@@ -1,0 +1,160 @@
+# ### racket-style macro
+def &((match $cases) $cond) = &(match $cond $cases)
+
+def &fun param... &= body... = &{
+    def lambda $param... = $body...
+    lambda
+}
+
+&(if $cond then $succ else $fail) = &(match $cond {
+    T _ = $then
+    F _ = $else
+})
+
+def &cond [&:block cases...] = match cases {
+    [] = &(error "cond no match")
+    [[cond then...] rest...] = &(if $cond $then (cond (:block $rest...)))
+}
+
+def &cond expr [&:block [pred... &= then...]...] = &{
+    let val = $expr
+    cond $[&:block [[pred... &val] then...]...]
+}
+
+
+# ### math context ###
+# changes parsing (like bash `$((1 + 2))`)
+def fib = of {
+    0 = 0
+    1 = 1
+    n = :m fib (n - 1) + fib (n - 2)
+}
+
+
+# ### unified block for if and match ###
+# optional brace
+if b {
+    then c
+    else d
+}
+
+match n
+1 = 1
+_ = fact (pred n)
+
+
+# ### auto-quoting for macro arguments ###
+# `(a = ,(if `b `c `d))
+a = {if b c d}
+
+{and a b = if a b &False}
+c = {and a b}
+# expands to
+c = {if a b False}
+
+
+# ### data type and pattern equivalence ###
+# equivalence (as in predicate in prolog) for data types and patterns
+struct Res T E {
+    T { val = T }
+    F { val = E }
+}
+match a { T val = T val, x = x } # = a, forall a
+
+
+# ### pattern as a value ###
+[x, y] : Pat (List a) {x = a, y = a}
+p -> e # where
+# p : Pat v b
+# e : r with b in scope
+# : v -> r
+
+# alternatively
+&[x, y] : List a -> Res {x = a, y = a} ()
+syntax -> p e a = match p a {
+    T b = with b e
+    F v = F v
+}
+# example
+match lst {
+    &[x] -> x
+}
+
+
+# ### multiple patterns projecting to same value ###
+!ShowHex background = "232425" # background = Colour 0x232425
+print (ShowHex background) # = "232425"
+print (ShowRgb background) # = "35,36,37"
+
+
+# ### lambda syntax ###
+# no precedence issues, multiple clauses
+{T x -> x}
+# better chaining, separate syntax from dict
+?T x -> x
+
+
+# ### bi-directional patterns ###
+Json (Point x y) = JArr [JNum x, JNum y]
+!Str data = "[1, 2]"
+match data {
+    Json (Point x y) = print x *> print y
+}
+# or
+!Str (!Json (Point x y)) = "[1, 2]"
+print x *> print y
+
+
+# ### lua-style table-lists ###
+# function call
+map : {f : a -> b, list : List a} -> List b
+# positional and named arguments
+map str list=[1, 2]
+# App (a -> b) c = (a - c) -> b
+: {f : Int -> b} -> List b
+map list=[1, 2]
+
+# this may break higher-order usage though:
+compose : {b -> c, a -> b, a} -> c
+# name of b? a?
+
+# so alternatively only for records (no partial app)
+map{f, list} = ...
+map{str, list=[1, 2]}
+# this allows default values, which for functions would break currying
+
+# curry & default args are mutually exclusive
+# so ml/scala-style application might be good (you choose curry/tuple args):
+copy : Str -> Str -> {recursive : Bool, mkdir : Bool} -> IO ()
+# optional/named arguments are usually not suitable for currying anyways
+
+
+# ### expression patterns ###
+# expressions can be used as predicates in pattern
+fact : Int -> Int
+fact = {
+    (< 2) -> 1
+    'n -> n * fact (n - 1)
+}
+# lens (getter) in pattern, and pattern groups (racket `and` pattern)
+x, y : Functor f => (Int -> f Int) -> Pos -> f Pos
+dist : Pos -> Int
+dist {x 'x, y 'y} = abs x + abs y
+# possible implementation with pattern of type `a -> Match a`:
+Match = ...
+Accept f = {accept : a -> f a}
+Reject f = {reject : a -> f a}
+Functor Match = ...
+Accept Match = ...
+Reject Match = ...
+(<) : Accept f => Reject f => Int -> Int -> f Int
+'a : a -> Match a
+
+# alternatively, as an opaque contravariant type
+Just : Pat a -> Pat (Maybe a)
+Nothing : Pat (Maybe a)
+or : a -> Maybe a -> a
+or d = {
+    Just 'a -> a
+    Nothing -> d
+}
