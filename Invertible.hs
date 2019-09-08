@@ -174,12 +174,9 @@ paren = between (single '(') (single ')')
 synSymbol :: Syntax f => f Symbol
 synSymbol = some $ isAlpha <??> token
 
-isoExp :: Iso (Either Symbol [Exp]) Exp
-isoExp = Iso to from where
+synExp :: Syntax f => f Exp
+synExp = Iso to from <$$> (synSymbol <++> paren (many synExp)) where
   to (Left s)  = Symbol s
   to (Right l) = Paren l
   from (Symbol s) = Left s
   from (Paren l)  = Right l
-
-synExp :: Syntax f => f Exp
-synExp = isoExp <$$> (synSymbol <++> paren (many synExp)) where
