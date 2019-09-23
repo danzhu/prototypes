@@ -26,7 +26,7 @@ type Fold      s   a   = forall r. Monoid r                    => (a -> Const r 
 type Setter    s t a b =                                          (a -> Identity b)    -> s -> Identity t
 
 data Exchange  a b s t = Exchange (s -> a) (b -> t)
-type AnIso     s t a b = forall f. Functor f                   => Exchange a b a (f b) -> Exchange a b s (f t)
+type AnIso     s t a b = Exchange a b a (Identity b) -> Exchange a b s (Identity t)
 
 -- Lens < Getter
 -- Lens < Traversal
@@ -56,6 +56,9 @@ pointX f (Point x y) = (\x' -> Point x' y) <$> f x
 
 pointXY :: Traversal' Point Int
 pointXY f (Point x y) = Point <$> f x <*> f y
+
+pointLen :: Getter Point Int
+pointLen f p@(Point x y) = p <$ f (x + y)
 
 pointIso :: Iso' Point (Int, Int)
 pointIso = iso (\(Point x y) -> (x, y)) (uncurry Point)
@@ -94,6 +97,7 @@ main = do
   print $ over (rectTopLeft . pointX) (+ 2) rect
   print $ set (rectTopLeft . pointXY) 0 rect
   print $ view (rectTopLeft . pointIso) rect
+  print $ view (rectTopLeft . pointLen) rect
   print $ view (from pointIso) (3, 4)
   print $ over posedVal show posed
   print $ over mapped show lst
