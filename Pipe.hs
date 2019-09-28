@@ -1,19 +1,31 @@
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleInstances      #-}
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE MultiParamTypeClasses  #-}
+{-# LANGUAGE UndecidableInstances   #-}
 
-class Pipe a b c d where
-  lift :: (a -> b) -> c -> d
+class Pipe a b c d | a b c -> d, a b d -> c, a c d -> b, b c d -> a where
+  (<|) :: (a -> b) -> c -> d
 
 instance Pipe a b a b where
-  lift = id
+  (<|) = id
 
 instance (Pipe a b c d, Functor f) => Pipe a b (f c) (f d) where
-  lift = fmap . lift
+  (<|) = fmap . (<|)
 
-test :: [[Int]] -> [[Int]]
-test = lift add1 where
-  add1 = (+ 1) :: Int -> Int
+showInt :: Int -> String
+showInt = show
+
+testList :: [[Int]] -> [[String]]
+testList = (showInt <|)
+
+testFunc :: Int -> Int -> String
+testFunc = showInt <| (+)
+
+testApp :: String
+testApp = showInt <| (1 :: Int)
 
 main :: IO ()
 main = do
-  print $ test [[1, 2], [3, 4]]
+  print $ testList [[1, 2], [3, 4]]
+  print $ testFunc 1 2
+  print $ testApp

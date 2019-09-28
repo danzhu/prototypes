@@ -159,7 +159,7 @@ class Dfa:
     def _expand(self, nfa: Nfa, states: Set[NfaState]) -> Set[NfaState]:
         res: Set[NfaState] = set()
 
-        def rec(state: NfaState):
+        def rec(state: NfaState) -> None:
             if state in res:
                 return
             res.add(state)
