@@ -158,3 +158,79 @@ or d = {
     Just 'a -> a
     Nothing -> d
 }
+
+# or, simply use regular functions for transformations
+# (like Haskell view patterns)
+(:) : Getter s a -> s -> a
+x, y : Lens' Pos Int
+dist : Pos -> Int
+dist {:x 'x, :y 'y} = abs x + abs y
+# desugar:
+dist = \t0 -> (
+    'x = t0 : x
+    'y = t0 : y
+    abs x + abs y
+)
+
+
+# ### pattern lift operator ###
+# `!` operator (like in Idris) but for patterns
+# theoretical (pattern) type:
+(!) : a -> m a
+# example:
+Left : Either a b -> Maybe a
+left : Either a b -> Maybe a
+left = \(Left (!x)) -> Just x
+# desugar:
+left = \t0 -> Left t0 >>= \x -> Just x
+
+
+# ### lambda calculus extension: pattern syntax ###
+# expression:
+# abstraction
+\x -> a
+(x : Pat a) -> (a : Expr b) -> Expr (a -> b)
+# application
+a b
+(a : Expr (a -> b)) -> (b : Expr a) -> Expr b
+# let
+let x = a in b
+(\x -> b) a
+(a : Expr a) -> (x : Pat a) -> (b : Expr b) -> Expr b
+
+# pattern:
+# view pattern
+(a -> x)
+v | x <- a v
+(a : Expr (a -> b)) -> (x : Pat b) -> Pat a
+# pattern guard
+x | y <- a
+((\x -> a) -> y)
+(x : Pat a) -> (a : Expr b) -> (y : Pat b) -> Pat a
+
+
+# ### CPS-based patterns ###
+# translates directly into lambda calculus,
+# since the exprs in match arms are the continuations,
+# and introduces variables easily
+Left : Either a b -> (a -> r) -> Maybe r
+Pair : (a, b) -> (a -> b -> r) -> r
+# or flip around for lens-style:
+Left : (a -> r) -> Either a b -> Maybe r
+Pair : (a -> b -> r) -> (a, b) -> r
+
+# alternatively, single pattern for whole type (decision tree):
+Either : Either a b -> (a -> r) -> (b -> r) -> r
+List : List a -> (a -> List a -> r) -> r -> r
+# this removes the dependency on `Maybe`
+
+T = a * (b + c)
+T : T -> (a -> ((b -> r) -> (c -> r) -> r) -> r) -> r
+
+
+# ### do-block for dynamic language ###
+# similar to Racket `(require algebraic/class)`
+# can be used for do-syntax or operator
+main = IO {
+    pure ()
+}
