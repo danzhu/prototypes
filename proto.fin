@@ -234,3 +234,204 @@ T : T -> (a -> ((b -> r) -> (c -> r) -> r) -> r) -> r
 main = IO {
     pure ()
 }
+
+
+# ### right-associative tag/function ###
+sort values map
+# =>
+sort (values map)
+
+ok: some: 1
+# =>
+Ok (Some 1)
+
+# can be syntactic sugar for pair with left operand quoted (like Perl)
+ok: some: 1
+# =>
+'(ok (some 1))
+
+Void = Sum {}
+Unit = Prod {}
+Opt a = Sum {
+    some: a
+    none: Unit
+}
+tagged {
+    tag: 'Sum
+    data: object {
+        {some 'some, symbol 'a}
+        {some 'none, symbol 'Unit}
+    }
+}
+
+Data = Sum {
+    tagged: Prod {tag: Sym, data: Opt Data}
+    object: List Prod {key: Opt Sym, value: Data}
+}
+Json = Sum {
+    null: Unit
+    string: Str
+    number: Float
+    boolean: Bool
+    array: List Json
+    object: List Prod {name: Str, value: Json}
+}
+
+tagged {'Sum, object {
+    {some 'tagged, tagged {'Prod, object {
+        {some 'tag, symbol 'Sym}
+        {some 'data, tagged {'Opt, symbol 'Data}}
+    }}}
+    {some 'object, tagged {'List, tagged {'Prod, object {
+        {some 'key, tagged {'Opt, symbol 'Sym}}
+        {some 'value, symbol 'Data}
+    }}}}
+}}
+
+tagged "Sum" | object {
+    some "tagged" = tagged tag:"Prod" data:| object {
+        some "tag" = symbol "Sym"
+        some "data" = tagged "Opt" | symbol "Data"
+    }
+    some "object" = tagged "List" | tagged "Prod" | object {
+        some "key" = tagged "Opt" | symbol "Sym"
+        some "value" = symbol "Data"
+    }
+}
+
+Tagged("Sum", Object({
+    Some("tagged"): Tagged("Prod", Object({
+        Some("tag"): Symbol("Sym"),
+        Some("data"): Tagged("Opt", Symbol("Data")),
+    })),
+}))
+
+# packages build
+Ast = Sum
+    infix : Prod
+        op : Str
+        left : Ast
+        right : Ast
+    prefix : Prod
+        op : Str
+        val : Ast
+    pair : Prod
+        first : Ast
+        second : Ast
+
+packages = flat_map import < fs:find "*/.pkg"
+
+config = import "config"
+
+render = in out ->
+    fs:write out <
+    str:replace_all "\{\{(.*)\}\}" config <
+    fs:read in
+
+default = map packages < config "packages"
+
+
+# === indent syntax ===
+if cond then
+    true
+  else
+    false
+
+
+# === newline lists ===
+# newline separates list elements, i.e. `\n` = `,`
+# pedantic: each non-empty line = one element
+
+# `[a 1, b 2]`
+# `a 1 : b 2 : []`
+[a 1, b 2]
+[a 1
+ b 2]
+[
+  a 1
+  b 2
+]
+# `a 1 : b 2 : l 3`
+[a 1, b 2 | l 3]
+[a 1
+ b 2
+|l 3]
+[
+  a 1
+  b 2
+| l 3
+]
+
+# maybe also for expressions
+# but this doesn't play well with currying
+# better suited for lisp
+
+# impure: `a 1; b 2`
+# pure: `a 1 >> b 2`
+(a 1, b 2)
+# and this doesn't really make sense / isn't really useful
+# `a 1; b 2 (c 3)`
+# `a 1 >> b 2 (c 3)`
+(a 1, b 2 | c 3)
+(a 1
+ b 2
+|c 3)
+(
+  a 1
+  b 2
+| c 3
+)
+
+
+# === generalized string interpolation ===
+# normal string interpolation
+"hello $user"
+"hello " ++ show user
+
+# syntax can be generalized, e.g. as `Applicative`:
+"$[1, 2] + $[3, 4]"
+(\a b -> show a ++ " + " ++ show b) <$> [1, 2] <*> [3, 4]
+[show a ++ " + " ++ show b | a <- [1, 2], b <- [3, 4]]
+
+# and reversed, for pattern matching:
+"$k=$v" = "key=val"
+(k, v) ~= match "(.*)=(.*)" "key=val"
+
+# for both cases, formatting (or some other extra info) may be needed:
+# format for expression
+"0x${addr:x}"
+printf "0x%x" addr
+# regex for pattern
+"${key:[^=]}=$val"
+
+# alternatively, have some special type to wrap extra info:
+RegexPat : Regex -> Pat -> Pat
+"${RegexPat '[^=]' key}=$val"
+# in which case, having some sort of quoting may be cleaner
+"${RegexPat [^=] key}=$val"
+reg = "[^=]"
+"${RegexPat $reg key}=$val"
+
+
+# === macro as functions (first-class) ===
+# for some expression
+f (g a)
+# instead of evaluating as
+(eval ctx 'f) (eval ctx '(g a))
+# we can pass context and ast to the function
+(eval ctx 'f) ctx '(g a)
+# now, `f` can choose to behave like a normal function
+f ctx ast = ... (eval ctx ast) ...
+# or, it can do macro stuff
+quote _ ast = ast
+scope ctx _ = ctx
+assert ctx ast = when (not $ eval ctx ast) do
+    print "assert failed:" ast
+# this has the benefits:
+# 1. removes the need for separate mechanisms for functions/macros
+# 2. macros can be passed around like values (first-class)
+# downside is of course:
+# 1. less predictable evaluation
+# 2. can't optimize
+# up/down-side (depends):
+# 1. macros can be shadowed

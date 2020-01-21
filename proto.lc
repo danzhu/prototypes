@@ -1,0 +1,58 @@
+map _ [] = []
+map f (x :: xs) = f x :: map f xs
+
+map f l = Bool.if (List.is_empty l)
+    List.empty
+    (List.cons
+        (f (List.head l))
+        (map f (List.tail l)))
+
+
+core =
+    abs params... body
+    app func args...
+    var v
+
+lazy =
+    delay expr
+    force
+
+bool =
+    if cond then else
+    true
+    false
+
+pair =
+    pair
+    first
+    second
+
+list =
+    cons
+    empty
+    head
+    tail
+    is_empty
+
+lazy thunk =
+    delay expr = \_ -> expr
+    force = \calc -> (calc calc)
+
+bool lambda-bool =
+    if cond then else = (lazy.force (cond [lazy.delay then] [lazy.delay else]))
+    true = \a _ -> a
+    false = \_ b -> b
+
+pair bool-pair =
+    pair = \a b -> \sel -> [bool.if sel a b]
+    first = \p -> (p bool.true)
+    second = \p -> (p bool.false)
+
+list lambda-bool-pair-list =
+    cons = \h t -> \sel -> (sel h t)
+    empty = \_ -> bool.true
+    head = \l -> (l (\h _ -> h))
+    tail = \l -> (l (\_ t -> t))
+    is-empty = \l -> (l (\_ _ -> bool.false))
+
+list fold-list = ...

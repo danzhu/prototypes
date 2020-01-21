@@ -1,0 +1,17 @@
+Binary : (Double -> Double -> Double) <- Str
+Binary = {
+    (+) <- "+"
+    (*) <- "*"
+}
+
+step : List Double -> Str -> List Double
+step = {
+    xs            (Str n)     -> n :: xs
+    [a; b; ...xs] (Binary op) -> op b a :: xs
+}
+
+calc : Str -> Double
+calc s = s . words . foldl step [] . head
+
+main : IO ()
+main = getLine! . calc . print!
