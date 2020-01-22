@@ -3,3 +3,6 @@
 *.o
 *.so
 .mypy_cache/
+.stack-work/
+/prototypes.cabal
+/stack.yaml.lock

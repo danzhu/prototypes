@@ -1,0 +1,10 @@
+name: prototypes
+
+dependencies:
+  - base >= 4.7 && < 5
+
+ghc-options: -Wall
+
+executables:
+  MacroInterp:
+    main: MacroInterp.hs

@@ -1,4 +1,3 @@
-{-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 
@@ -11,7 +10,7 @@ data Val
 instance Show Val where
   show = \case
     VStr s -> show s
-    VFun f -> "<func>"
+    VFun _ -> "<func>"
 
 data Ast
   = AStr String
@@ -20,8 +19,8 @@ data Ast
 
 instance Show Ast where
   show = \case
-    AStr s -> show s
-    AVar v -> v
+    AStr s   -> show s
+    AVar v   -> v
     AApp f a -> "(" ++ show f ++ " " ++ show a ++ ")"
 
 type Ctx = [(Var, Val)]
@@ -36,14 +35,19 @@ interpret ctx = \case
     VFun f -> f ctx arg
     v      -> error $ "interpret: applying non-function: " ++ show v
 
+macro :: (Ast -> Val) -> Val
 macro = VFun . const
-function f = VFun \ctx -> f . interpret ctx
+
+function :: (Val -> Val) -> Val
+function f = VFun $ \ctx -> f . interpret ctx
 
 lambda :: Ctx -> Ast -> Val
-lambda ctx (AVar param) =
-  macro \body ->
-  function \arg ->
-  interpret ((param, arg) : ctx) body
+lambda ctx = \case
+  AVar param ->
+    macro $ \body ->
+    function $ \arg ->
+    interpret ((param, arg) : ctx) body
+  arg -> error $ "lambda: incorrect argument: " ++ show arg
 
 main :: IO ()
 main = do
