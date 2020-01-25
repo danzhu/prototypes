@@ -8,3 +8,6 @@ ghc-options: -Wall
 executables:
   MacroInterp:
     main: MacroInterp.hs
+    dependencies:
+      - megaparsec
+      - parser-combinators

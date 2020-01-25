@@ -434,4 +434,23 @@ assert ctx ast = when (not $ eval ctx ast) do
 # 1. less predictable evaluation
 # 2. can't optimize
 # up/down-side (depends):
-# 1. macros can be shadowed
+# 1. macros can be shadowed (also in lisp)
+
+
+# === unambiguous currying in ast ===
+# in ast
+a b c
+# can be represented as
+App (App a b) c
+# without ambiguity since
+{a b} c
+# is
+App (Block [App a b]) c
+# but in expr both
+(a, b), c
+a, b, c
+# are
+Pair (Pair a b) c
+
+# note: above example uses `{}` (which is an extra node in ast);
+# `()` doesn't work (assuming it is not represented in ast)

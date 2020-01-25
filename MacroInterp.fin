@@ -1,0 +1,4 @@
+(fn a (id "result: $a\n")) (show (
+    hello
+    hey "hello" var
+))
