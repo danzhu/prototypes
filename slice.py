@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+from dataclasses import dataclass
+from functools import total_ordering
+from typing import Iterator, Sequence, TypeVar, Union, overload
 import operator
-import functools
-from typing import Generic, Iterator, Sequence, TypeVar, Union, overload
 
 T = TypeVar('T')
 
 
-class SpanIter(Generic[T], Iterator[T]):
-    def __init__(self, sequence: Sequence[T], indices: Iterator[int]) -> None:
-        self.sequence = sequence
-        self.indices = indices
+@dataclass
+class SpanIter(Iterator[T]):
+    sequence: Sequence[T]
+    indices: Iterator[int]
 
     def __next__(self) -> T:
         return self.sequence[next(self.indices)]
@@ -19,8 +21,12 @@ class SpanIter(Generic[T], Iterator[T]):
         return operator.length_hint(self.indices, NotImplemented)
 
 
-@functools.total_ordering
-class Span(Generic[T], Sequence[T]):
+@dataclass
+@total_ordering
+class Span(Sequence[T]):
+    sequence: Sequence[T]
+    indices: Sequence[int]
+
     def __init__(
             self,
             sequence: Sequence[T],
@@ -32,21 +38,14 @@ class Span(Generic[T], Sequence[T]):
     def __str__(self) -> str:
         return '<{}>'.format(', '.join(map(repr, self)))
 
-    def __repr__(self) -> str:
-        return '{}({!r}, indices={!r})'.format(
-            self.__class__.__name__,
-            self.sequence,
-            self.indices,
-        )
-
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Span):
-            return False
+            return NotImplemented
         return len(self) == len(other) and all(map(operator.eq, self, other))
 
     def __lt__(self, other: object) -> bool:
         if not isinstance(other, Span):
-            return False
+            return NotImplemented
         for a, b in zip(self, other):
             if a != b:
                 return a < b
@@ -57,10 +56,10 @@ class Span(Generic[T], Sequence[T]):
         ...
 
     @overload
-    def __getitem__(self, index: slice) -> 'Span[T]':
+    def __getitem__(self, index: slice) -> Span[T]:
         ...
 
-    def __getitem__(self, index: Union[int, slice]) -> 'Union[T, Span[T]]':
+    def __getitem__(self, index: Union[int, slice]) -> Union[T, Span[T]]:
         if isinstance(index, int):
             return self.sequence[self.indices[index]]
         if isinstance(index, slice):

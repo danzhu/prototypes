@@ -454,3 +454,47 @@ Pair (Pair a b) c
 
 # note: above example uses `{}` (which is an extra node in ast);
 # `()` doesn't work (assuming it is not represented in ast)
+
+
+# === scope-as-an-object ===
+# two ways of sharing data between multiple functions:
+class Count {
+    constructor() {
+        this.val = 0
+    }
+    add() { this.val += 1 }
+    get() { return this.val }
+}
+
+function count() {
+    let val = 0
+    return {
+        add() { val += 1 },
+        get() { return val },
+    }
+}
+# i.e. OOP / functional
+
+# OOP style is
+# 1. more inspectable:
+let c = new Count()
+console.log(c.val)
+# 2. can call the other functions directly (e.g. `add` can call `get`);
+#   functional can do the same, but more verbosely:
+let val = 0
+let add = () => { val += 1 }
+let get = () => val
+return { add, get }
+
+# but functional style:
+# 1. can be nested (arguably Java classes also can be nested, but complicated)
+# 2. allow non-class return values (also possible in OOP w/o constructors)
+# 3. can enforce encapsulation by not even exposing the private variables
+#   (though making it hard to inspect, can workaround with some `toString`)
+
+# can combine the two
+scope count() {
+    let val = 0
+    pub add() { val += 1 }
+    pub get() { return val }
+}
