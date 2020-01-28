@@ -44,27 +44,41 @@ class GridView {
 public:
     using size_type = std::array<std::size_t, Dim>;
     using trait = GridTrait<T, Dim>;
-    using iterator = typename trait::iterator;
-    using reference = typename std::iterator_traits<iterator>::reference;
 
     GridView(T *data, std::size_t *offsets)
         : m_data{data}, m_offsets{offsets} {}
 
-    reference operator[](std::size_t index) { return *(begin() + index); }
+    decltype(auto) operator[](std::size_t index) { return *(begin() + index); }
 
     T &operator[](size_type index) {
         std::size_t idx = index[Dim - 1];
-        for (int i = Dim - 2; i >= 0; --i)
+        for (std::ptrdiff_t i = Dim - 2; i >= 0; --i)
             idx += m_offsets[i + 1] * index[i];
         return m_data[idx];
     }
 
-    iterator begin() { return trait::iter(m_data, &m_offsets[1]); }
-    iterator end() { return trait::iter(m_data + m_offsets[0], &m_offsets[1]); }
+    decltype(auto) at(std::size_t index) {
+        auto it = begin() + index;
+        if (it >= end())
+            throw std::out_of_range{"index out of range"};
+        return *it;
+    }
+
+    T &at(size_type index) {
+        auto it = &(*this)[index];
+        if (it >= _end())
+            throw std::out_of_range{"index out of range"};
+        return *it;
+    }
+
+    decltype(auto) begin() { return trait::iter(m_data, &m_offsets[1]); }
+    decltype(auto) end() { return trait::iter(_end(), &m_offsets[1]); }
 
 private:
     T *m_data;
     std::size_t *m_offsets;
+
+    T *_end() { return m_data + m_offsets[0]; }
 };
 
 template <typename T, std::size_t Dim>
@@ -79,26 +93,21 @@ public:
     GridIter(T *data, std::size_t *offsets)
         : m_data{data}, m_offsets{offsets} {}
 
-    bool operator!=(const GridIter &other) { return m_data != other.m_data; }
     value_type operator*() { return {m_data, m_offsets}; }
-
+    bool operator!=(const GridIter &other) { return m_data != other.m_data; }
+    bool operator<(const GridIter &other) { return m_data < other.m_data; }
     GridIter operator+(difference_type diff) {
         return {m_data + diff * m_offsets[0], m_offsets};
     }
 
+    bool operator>(const GridIter &other) { return other < *this; }
+    bool operator<=(const GridIter &other) { return !(*this > other); }
+    bool operator>=(const GridIter &other) { return !(*this < other); }
     GridIter operator-(difference_type diff) { return *this + (-diff); }
-    GridIter operator+=(difference_type diff) { return *this = *this + diff; }
-    GridIter operator-=(difference_type diff) { return *this = *this - diff; }
-
-    GridIter &operator++() {
-        *this += 1;
-        return *this;
-    }
-
-    GridIter &operator--() {
-        *this -= 1;
-        return *this;
-    }
+    GridIter &operator+=(difference_type diff) { return *this = *this + diff; }
+    GridIter &operator-=(difference_type diff) { return *this = *this - diff; }
+    GridIter &operator++() { return *this += 1; }
+    GridIter &operator--() { return *this -= 1; }
 
 private:
     T *m_data;
@@ -112,25 +121,27 @@ class Grid {
 public:
     using view_type = GridView<T, Dim>;
     using size_type = typename view_type::size_type;
-    using iterator = typename view_type::iterator;
-    using reference = typename view_type::reference;
 
     explicit Grid(size_type sizes)
         : m_data(std::accumulate(sizes.begin(), sizes.end(), 1,
                                  std::multiplies<>())) {
         std::size_t offset = 1;
-        for (int i = Dim - 1; i >= 0; --i) {
+        for (std::ptrdiff_t i = Dim - 1; i >= 0; --i) {
             offset *= sizes[i];
             m_offsets[i] = offset;
         }
     }
 
-    reference operator[](std::size_t index) { return view()[index]; }
-    T &operator[](size_type index) { return view()[index]; }
+    decltype(auto) operator[](std::size_t index) { return view()[index]; }
+    decltype(auto) operator[](size_type index) { return view()[index]; }
+
+    decltype(auto) at(std::size_t index) { return view().at(index); }
+    decltype(auto) at(size_type index) { return view().at(index); }
+
+    decltype(auto) begin() { return view().begin(); }
+    decltype(auto) end() { return view().end(); }
 
     view_type view() { return {m_data.data(), m_offsets.data()}; }
-    iterator begin() { return view().begin(); }
-    iterator end() { return view().end(); }
 
 private:
     std::vector<T> m_data;
@@ -142,7 +153,15 @@ int main() {
     grid[{{0, 2}}] = 2;
     grid[1][1] = 1;
 
-    std::cout << grid[0][2] << '\n';
+    std::cout << grid.at(0).at(2) << '\n';
+    std::cout << grid.at({{1, 1}}) << '\n';
+
+    try {
+        // FIXME: this should throw
+        grid.at({{0, 3}});
+    } catch (const std::out_of_range &) {
+        std::cout << "caught out of range\n";
+    }
 
     for (auto r : grid) {
         for (auto i : r)
