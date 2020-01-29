@@ -1,51 +1,51 @@
-data Generator i o r = Output o (i -> Generator i o r)
-                     | Result r
+import           Control.Monad (ap, liftM, (>=>))
 
-instance Functor (Generator i o) where
-  -- fmap f g = g >>= pure . f
-  fmap f (Output o cont) = Output o $ \i -> fmap f $ cont i
-  fmap f (Result r)      = Result $ f r
+data Generator o i r
+  = Output o (i -> Generator o i r)
+  | Result r
 
-instance Applicative (Generator i o) where
+instance Functor (Generator o i) where
+  fmap = liftM
+
+instance Applicative (Generator o i) where
   pure = Result
-  -- g1 <*> g2 = g1 >>= \f -> fmap f g2
-  Output o cont <*> g             = Output o $ \i -> cont i <*> g
-  Result f      <*> Output o cont = Output o $ \i -> fmap f $ cont i
-  Result f      <*> Result r      = Result $ f r
+  (<*>) = ap
 
-instance Monad (Generator i o) where
-  Output o cont >>= f = Output o $ \i -> cont i >>= f
-  Result r      >>= f = f r
+instance Monad (Generator o i) where
+  Output o c >>= f = Output o $ c >=> f
+  Result r   >>= f = f r
 
-yield :: o -> Generator i o i
+yield :: o -> Generator o i i
 yield o = Output o pure
 
-list :: Generator () o r -> [o]
-list (Output o f) = o : list (f ())
+list :: Generator o () r -> [o]
+list (Output o c) = o : list (c ())
 list (Result _)   = []
 
+each :: Monad m => (o -> m i) -> Generator o i r -> m r
+each f (Output o c) = each f . c =<< f o
+each _ (Result r)   = pure r
 
-fib :: Int -> Int -> Generator i Int ()
+
+fib :: Int -> Int -> Generator Int i ()
 fib a b = do
-  yield a
+  _ <- yield a
   fib b (a + b)
 
 foo :: Generator Int Int String
 foo = do
   i <- yield 1
-  yield $ i + 1
+  _ <- yield $ i + 1
   pure "3"
 
 bar :: Generator Int Int ()
 bar = do
-  yield 0
+  _ <- yield 0
   res <- foo
-  yield $ read res
+  _ <- yield $ read res
   pure ()
 
 main :: IO ()
 main = do
-  print $ take 10 $ list $ fib 0 1
-  run bar
-  where run (Output o f) = print o >> run (f 1)
-        run (Result r)   = print r
+  print . take 10 . list $ fib 0 1
+  print =<< each ((1 <$) . print) bar

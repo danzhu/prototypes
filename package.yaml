@@ -11,3 +11,5 @@ executables:
     dependencies:
       - megaparsec
       - parser-combinators
+  Generator:
+    main: Generator.hs
