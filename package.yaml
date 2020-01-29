@@ -13,3 +13,7 @@ executables:
       - parser-combinators
   Generator:
     main: Generator.hs
+  Action:
+    main: Action.hs
+    dependencies:
+      - transformers
