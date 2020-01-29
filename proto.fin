@@ -498,3 +498,36 @@ scope count() {
     pub add() { val += 1 }
     pub get() { return val }
 }
+
+# can also act as modules
+
+# alternative syntax
+# using `=` for variables and `:` for exports
+# this (kind of) mirrors variables/kv-pairs in e.g. js
+count () = {
+    val = 0
+    add () : val += 1
+    get () : val
+}
+
+# can have `:` without key as `return` / merging (js `...` / py `**`)
+parse = {
+    expr = ...
+    term = ...
+    factor = ...
+    : expr
+}
+# alternative semantics would be extended pattern matching
+# i.e. `parse.expr` matches `expr = ...`, `parse.foo` matches `: expr`
+# complicated for curried nested patterns (including example above) though:
+val = {
+    foo 1 = 1
+    foo = 2
+}
+# value of `val.foo`?
+# to make this work, type system may need to support arbitrary intersections
+val.foo == {1 = 1} & 2 == {1 = 1, = 2}
+# also pattern matching would make enumeration not plausible
+# (assuming that we allow variables, which is needed if we want functions)
+# and thus less of an object and more of just a function
+# (unless of course, we do it like Prolog)
