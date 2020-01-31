@@ -3,74 +3,78 @@
 import           Control.Monad (ap, liftM)
 import           Control.Monad.Trans.Writer (execWriter, tell)
 
-data Task a r
-  = Emit (a (Task a r))
-  | Done r
+data Chain f a
+  = Seg (f (Chain f a))
+  | End a
 
-instance Functor a => Functor (Task a) where
+instance Functor f => Functor (Chain f) where
   fmap = liftM
 
-instance Functor a => Applicative (Task a) where
-  pure = Done
+instance Functor f => Applicative (Chain f) where
+  pure = End
   (<*>) = ap
 
-instance Functor a => Monad (Task a) where
-  Emit a >>= f = Emit $ (f =<<) <$> a
-  Done r >>= f = f r
+instance Functor f => Monad (Chain f) where
+  Seg s >>= f = Seg $ (f =<<) <$> s
+  End a >>= f = f a
 
-emit :: ((r -> Task a r) -> a (Task a r)) -> Task a r
-emit a = Emit (a Done)
+seg :: ((a -> Chain f a) -> f (Chain f a)) -> Chain f a
+seg = Seg . ($ End)
 
-runTask :: Monad m => (a (Task a r) -> m (Task a r)) -> Task a r -> m r
-runTask run (Emit act) = runTask run =<< run act
-runTask _ (Done res)   = pure res
+mapChain :: Functor f' => (f (Chain f r) -> f' (Chain f r)) -> Chain f r -> Chain f' r
+mapChain f (Seg s) = Seg $ mapChain f <$> f s
+mapChain _ (End a) = End a
+
+runChain :: Monad a => Chain a r -> a r
+runChain (Seg s) = runChain =<< s
+runChain (End a) = pure a
 
 
-data Gen o i t = Gen o (i -> t)
+data GenF o i c = GenF o (i -> c)
   deriving (Functor)
 
-runGen :: Functor m => (o -> m i) -> Gen o i t -> m t
-runGen f (Gen o c) = c <$> f o
+runGen :: Functor m => (o -> m i) -> GenF o i c -> m c
+runGen f (GenF o c) = c <$> f o
 
-type Generator o i = Task (Gen o i)
+type Gen o i = Chain (GenF o i)
 
-yield :: o -> Generator o i i
-yield = emit . Gen
+yield :: o -> Gen o i i
+yield = seg . GenF
 
-each :: Monad m => (o -> m i) -> Generator o i r -> m r
-each f = runTask (runGen f)
+each :: Monad m => (o -> m i) -> Gen o i r -> m r
+each f = runChain . mapChain (runGen f)
 
-list :: Generator o () r -> [o]
+list :: Gen o () r -> [o]
 list = execWriter . each (tell . (:[]))
 
-fib :: Int -> Int -> Generator Int i ()
+fib :: Int -> Int -> Gen Int i ()
 fib a b = yield a *> fib b (a + b)
 
 
-data IOAct t
-  = GetLn (String -> t)
-  | PutStrLn String t
+data RwF c
+  = GetLn (String -> c)
+  | PutStrLn String c
   deriving (Functor)
 
-runIO :: IOAct t -> IO t
-runIO (GetLn t)      = t <$> getLine
-runIO (PutStrLn s t) = t <$ putStrLn s
+runIO :: RwF c -> IO c
+runIO (GetLn c)      = c <$> getLine
+runIO (PutStrLn s c) = c <$ putStrLn s
 
-type IOTask = Task IOAct
+type Rw = Chain RwF
 
-ioGetLn :: IOTask String
-ioGetLn = emit GetLn
+ioGetLn :: Rw String
+ioGetLn = seg GetLn
 
-ioPutStrLn :: String -> IOTask ()
-ioPutStrLn ln = emit $ PutStrLn ln . ($ ())
+ioPutStrLn :: String -> Rw ()
+ioPutStrLn ln = seg $ PutStrLn ln . ($ ())
 
-echo :: IOTask ()
+echo :: Rw ()
 echo = ioPutStrLn =<< ioGetLn
 
 
 main :: IO ()
 main = do
   print . take 10 . list $ fib 0 1
-  runTask runIO echo
+  runChain $ mapChain runIO echo
 
--- objective: like Generator, but ensure correct output/input type pairs
+-- like Generator.hs, but ensure correct output/input type pairs
