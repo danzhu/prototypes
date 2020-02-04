@@ -4,5 +4,7 @@
 *.so
 .mypy_cache/
 .stack-work/
+/node_modules/
+/package-lock.json
 /prototypes.cabal
 /stack.yaml.lock
