@@ -550,3 +550,21 @@ foo(A, B, ..., Z)
 A, B, ... -> Z
 # since it simulates expression
 foo(A, B, ...) = Opt Z
+
+
+# === cons cell vs lambda ===
+# compare lisp lists:
+(a b . a)
+(a . (b . a))
+# with Haskell lambdas:
+\a b -> a
+\a -> \b -> a
+# both right-associative and "curried"
+
+# though there's no "empty function" so
+(a b)
+(a b . ())
+# makes sense but
+\a b
+\a b -> \
+# doesn't
