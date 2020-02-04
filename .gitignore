@@ -1,10 +1,20 @@
-*.hi
-*.ibc
+# common
 *.o
 *.so
-.mypy_cache/
-.stack-work/
-/node_modules/
-/package-lock.json
+
+# haskell
+*.hi
+/.stack-work/
 /prototypes.cabal
 /stack.yaml.lock
+
+# idris
+*.ibc
+
+# python
+/.mypy_cache/
+
+# typescript
+/.log/
+/node_modules/
+/package-lock.json
