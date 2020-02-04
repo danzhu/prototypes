@@ -531,3 +531,22 @@ val.foo == {1 = 1} & 2 == {1 = 1, = 2}
 # (assuming that we allow variables, which is needed if we want functions)
 # and thus less of an object and more of just a function
 # (unless of course, we do it like Prolog)
+
+
+# === function Prolog search ===
+file ~/.vim/$f =
+    guard (f != "init.vim")
+    file vim/$f
+# Prolog
+file(P, C) :-
+    append("~/.vim/", F, P),
+    F != "init.vim",
+    append("vim/", F, P2),
+    file(P2, C).
+
+# there's always a functional dependency for
+foo(A, B, ..., Z)
+# which is
+A, B, ... -> Z
+# since it simulates expression
+foo(A, B, ...) = Opt Z

@@ -1,3 +1,11 @@
+# fn = macro ctx param (
+#     macro _ body (
+#         macro ctx' arg (
+#             eval [param : eval ctx' arg | ctx] body
+#         )
+#     )
+# )
+
 (fn a (id "result: $a\n")) (show (
     hello
     hey "hello" var

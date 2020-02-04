@@ -30,16 +30,16 @@ runChain (Seg s) = runChain =<< s
 runChain (End a) = pure a
 
 
-data GenF o i c = GenF o (i -> c)
+data Yield o i c = Yield o (i -> c)
   deriving (Functor)
 
-runGen :: Functor m => (o -> m i) -> GenF o i c -> m c
-runGen f (GenF o c) = c <$> f o
+runGen :: Functor m => (o -> m i) -> Yield o i c -> m c
+runGen f (Yield o c) = c <$> f o
 
-type Gen o i = Chain (GenF o i)
+type Gen o i = Chain (Yield o i)
 
 yield :: o -> Gen o i i
-yield = seg . GenF
+yield = seg . Yield
 
 each :: Monad m => (o -> m i) -> Gen o i a -> m a
 each f = runChain . mapChain (runGen f)
@@ -49,6 +49,17 @@ list = ($ []) . execWriter . each (tell . (:))
 
 fib :: Int -> Int -> Gen Int i ()
 fib a b = yield a *> fib b (a + b)
+
+fibTram :: Int -> Gen Int Int Int
+fibTram n
+  | n < 2     = pure n
+  | otherwise = (+) <$> yield (n - 1) <*> yield (n - 2)
+
+trampoline :: (p -> Gen p a a) -> p -> a
+trampoline f = tram [] . f where
+  tram s (Seg (Yield a c)) = tram (c : s) $ f a
+  tram (c : s) (End a)     = tram s $ c a
+  tram [] (End a)          = a
 
 
 data RwF c
@@ -75,6 +86,7 @@ echo = rwPutStrLn =<< rwGetLn
 main :: IO ()
 main = do
   print . take 10 . list $ fib 0 1
+  print $ trampoline fibTram 10
   runChain $ mapChain runRw echo
 
 -- like Generator.hs, but ensure correct output/input type pairs
