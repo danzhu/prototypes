@@ -412,6 +412,24 @@ RegexPat : Regex -> Pat -> Pat
 reg = "[^=]"
 "${RegexPat $reg key}=$val"
 
+# example use case: routing
+route {
+    Get "/" -> home
+    Get "/user/$id" -> get_user id
+}
+
+# we may even want a "quasiquote" mechanism for otther syntax, e.g. sql
+sql! select $name, $age from users where id = $id
+sql! select ${count:count(*)} from users
+sql! insert into users ($name, $age)
+# or simply reuse string interpolation syntax for everything:
+sql! "select ${count:count(*)} from users"
+Macro "sql!" (Interp [Str "select ", Val "count" "count(*)", Str " from users"])
+# macros would be needed for this,
+# since inputs and outputs are mixed in the same interpolation
+# or, separate into input and output:
+select! "$name, $age" = from! "users where id = $id"
+
 
 # === macro as functions (first-class) ===
 # for some expression
@@ -568,3 +586,25 @@ foo(A, B, ...) = Opt Z
 \a b
 \a b -> \
 # doesn't
+
+
+# === multi-match ===
+# normally pattern matching only takes a single value as input,
+# therefore map/dict needs special syntax:
+{ name: name } = { name: "Name", id: 11 }
+# if we use a list of pairs, this wouldn't always work:
+let ("name", name) : _ = [("id", 11), ("name", "Name")]
+# to make something like this work:
+[..., (2, x), ...] = [(0, 0), (1, 1), (2, 2)]
+# we could backtrack when matching (like parser combinators)
+match : Patt (List a) -> List a -> Match
+match [..., patt, ...] list = choice $ map (match patt) list
+
+# this enables us to e.g. implement maps/dicts using sets:
+{ 'name -> name } = { 'id -> 11, 'name -> "Name" }
+# where `{}` are sets and `a -> b` is a key-value pair/tuple `(a, b)`
+# which compares using the key (like Haskell `Arg`)
+
+# now, naive implementation would have horrible performance,
+# so to make this useful outer pattern may need to inspect inner pattern,
+# and optimize based on that
