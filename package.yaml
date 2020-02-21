@@ -17,3 +17,10 @@ executables:
     main: Action.hs
     dependencies:
       - transformers
+  Template:
+    main: Template.hs
+    dependencies:
+      - megaparsec
+      - parser-combinators
+      - mtl
+      - containers
