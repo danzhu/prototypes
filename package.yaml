@@ -24,3 +24,11 @@ executables:
       - parser-combinators
       - mtl
       - containers
+  ConfigLang:
+    main: ConfigLang.hs
+    dependencies:
+      - containers
+      - megaparsec
+      - mtl
+      - parser-combinators
+      - text
