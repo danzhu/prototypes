@@ -3,7 +3,7 @@
 {-# LANGUAGE TupleSections     #-}
 
 import           Control.Applicative (empty, liftA2, optional, (<|>))
-import           Control.Monad (void, when)
+import           Control.Monad (unless, void, when)
 import           Control.Monad.Combinators (between, many, manyTill, option,
                                             skipMany)
 import           Control.Monad.Reader (ReaderT, ask, asks, local, runReaderT)
@@ -22,7 +22,7 @@ import           System.Exit (die, exitFailure)
 import           System.IO (hPutStr, stderr)
 import           Text.Megaparsec (ParseErrorBundle, Parsec, Pos, anySingle,
                                   chunk, eof, pos1, runParser, single,
-                                  takeWhile1P)
+                                  takeWhile1P, takeWhileP)
 import           Text.Megaparsec.Char (newline)
 import qualified Text.Megaparsec.Char.Lexer as L
 import           Text.Megaparsec.Error (errorBundlePretty)
@@ -43,65 +43,72 @@ bare c = isAlphaNum c || Set.member c special where
   special = Set.fromList "$%*+,-./:=@_~"
 
 
--- R: indent, W: output, S: current line nonempty
-type Disp = RWS Int Text Bool
+data DispPos
+  = Word Text
+  | Line
 
-class Display a where
-  disp :: a -> Disp ()
+-- R: indent, W: output, S: position
+type Disp = RWS Int Text DispPos
 
 dispLine :: Disp ()
 dispLine = do
-  nonempty <- get
-  when nonempty $ tell "\n"
-  put False
+  get >>= \case
+    Word _ -> tell "\n"
+    Line -> pure ()
+  put Line
 
-dispWord :: Text -> Disp ()
-dispWord s = do
-  nonempty <- get
-  if nonempty
-    then tell " "
-    else tell . (`T.replicate` "  ") =<< ask
+dispText :: Bool -> Text -> Text -> Disp ()
+dispText lead trail s = do
+  get >>= \case
+    Word sep -> when lead $ tell sep
+    Line -> do
+      ind <- ask
+      tell $ T.replicate ind "  "
   tell s
-  put True
+  put $ Word trail
 
-indented :: Disp a -> Disp a
-indented d = dispLine *> local (+ 1) d
+dispWord, dispPre, dispPost :: Text -> Disp ()
+dispWord = dispText True " "
+dispPre  = dispText True ""
+dispPost = dispText False " "
 
-display :: Display a => a -> Text
-display a = snd $ evalRWS (disp a) 0 False
+dispBetween :: Text -> Text -> Disp a -> Disp a
+dispBetween o e d = dispPre o *> d <* dispPost e
 
+dispBlock :: Disp a -> Disp a
+dispBlock = local (+ 1)
 
-splitStrs :: [Conf] -> ([Text], [Conf])
-splitStrs (CStr s : as) = do
-  let (ss, rs) = splitStrs as
-  (s : ss, rs)
-splitStrs rs = ([], rs)
+display :: Disp a -> Text
+display d = snd $ evalRWS d 0 Line
+
 
 quoted :: Text -> Text
 quoted s = if T.all bare s && not (T.null s)
   then s
   else T.pack $ show s
 
-dispField :: Display a => Text -> a -> Disp ()
-dispField n f = disp n *> disp f *> dispLine
+class Display a where
+  disp :: a -> Disp ()
 
 instance Display Conf where
   disp (CStr s) = disp s
-  disp (CRec r) = disp r
+  disp (CRec r) = dispBetween "(" ")" $ disp r
 
 instance Display Text where
   disp = dispWord . quoted
 
 instance Display Record where
   disp (Record args fields) = do
-    let (strs, rems) = splitStrs args
-    for_ strs disp
-    indented $ do
-      for_ rems $ dispField "-"
-      disp fields
+    for_ args disp
+    dispBlock $ disp fields
 
 instance Display Block where
-  disp (Block fields) = for_ fields $ uncurry dispField
+  disp (Block fields) = unless (null fields) $ do
+    dispLine
+    for_ fields $ \(n, f) -> do
+      disp n
+      disp f
+      dispLine
 
 
 type Parser = ReaderT (Maybe Pos) (Parsec Void Text)
@@ -126,7 +133,7 @@ symbol :: Text -> Parser Text
 symbol = L.symbol sc
 
 line :: Parser Text
-line = T.pack <$> (anySingle `manyTill` newline)
+line = takeWhileP (Just "character") (/= '\n') <* newline
 
 endline :: Parser Text
 endline = symbol "\n"
@@ -142,7 +149,7 @@ parens = between (symbol "(") (symbol ")")
 
 word :: Parser Text
 word = lexeme $ ident <|> quote where
-  ident = takeWhile1P (Just "bare character") bare
+  ident = takeWhile1P (Just "bare word") bare
   quote = T.pack <$> (sing <|> doub)
   sing = single '\'' *> (anySingle `manyTill` single '\'')
   doub = single '"' *> (L.charLiteral `manyTill` single '"')
@@ -155,11 +162,11 @@ indentStr = do
   rest <- option [] . indentBlock $ do
     leader <- line
     follow <- many $ emptyLn <|> (chunk prefix *> line)
-    _ <- space
     pure $ leader : follow
+  sc
   pure . T.unlines $ empties ++ rest
   where
-    emptyLn = "" <$ newline
+    emptyLn = T.empty <$ newline
 
 heredocStr :: Parser Text
 heredocStr = do
@@ -198,4 +205,4 @@ main = do
       hPutStr stderr $ errorBundlePretty err
       exitFailure
     Right ast -> pure ast
-  T.putStr $ display ast
+  T.putStrLn . display $ disp ast
