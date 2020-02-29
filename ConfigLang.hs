@@ -2,16 +2,20 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections     #-}
 
-import           Control.Applicative (empty, liftA2, optional, (<|>))
+module Main
+  ( main
+  ) where
+
+import           Control.Applicative (empty, liftA2, (<|>))
 import           Control.Monad (unless, void, when)
-import           Control.Monad.Combinators (between, many, manyTill, option,
-                                            skipMany)
-import           Control.Monad.Reader (ReaderT, ask, asks, local, runReaderT)
+import           Control.Monad.Combinators (choice, many, manyTill, option,
+                                            skipMany, skipSome)
+import           Control.Monad.Reader (ReaderT, ask, local, runReaderT)
 import           Control.Monad.RWS.Lazy (RWS, evalRWS)
 import           Control.Monad.State.Lazy (get, put)
 import           Control.Monad.Writer.Lazy (tell)
 import           Data.Char (isAlphaNum)
-import           Data.Foldable (for_, toList)
+import           Data.Foldable (for_)
 import qualified Data.Set as Set
 import           Data.Text (Text)
 import qualified Data.Text as T
@@ -27,15 +31,14 @@ import           Text.Megaparsec.Char (newline)
 import qualified Text.Megaparsec.Char.Lexer as L
 import           Text.Megaparsec.Error (errorBundlePretty)
 
-data Conf
-  = CStr Text
-  | CRec Record
+data Record = Record [Text] Block
   deriving (Show)
 
-data Record = Record [Conf] Block
-  deriving (Show)
-
-newtype Block = Block [(Text, Record)]
+data Block
+  = Fields [(Text, Record)]
+  | Str Text
+  | Rec Record
+  | Empty
   deriving (Show)
 
 bare :: Char -> Bool
@@ -51,11 +54,7 @@ data DispPos
 type Disp = RWS Int Text DispPos
 
 dispLine :: Disp ()
-dispLine = do
-  get >>= \case
-    Word _ -> tell "\n"
-    Line -> pure ()
-  put Line
+dispLine = tell "\n" *> put Line
 
 dispText :: Bool -> Text -> Text -> Disp ()
 dispText lead trail s = do
@@ -90,35 +89,41 @@ quoted s = if T.all bare s && not (T.null s)
 class Display a where
   disp :: a -> Disp ()
 
-instance Display Conf where
-  disp (CStr s) = disp s
-  disp (CRec r) = dispBetween "(" ")" $ disp r
-
 instance Display Text where
   disp = dispWord . quoted
 
 instance Display Record where
-  disp (Record args fields) = do
+  disp (Record args blk) = do
     for_ args disp
-    dispBlock $ disp fields
+    disp blk
 
 instance Display Block where
-  disp (Block fields) = unless (null fields) $ do
+  disp (Fields fs) = do
+    dispWord "\\"
     dispLine
-    for_ fields $ \(n, f) -> do
-      disp n
-      disp f
-      dispLine
+    dispBlock . for_ fs $ \(n, f) -> disp n *> disp f
+  disp (Rec r) = do
+    dispWord "|"
+    disp r
+  disp (Str s)
+    | Just (c, _) <- T.uncons s, c /= ' ' = do
+        dispWord ">"
+        dispLine
+        dispBlock . for_ (T.lines s) $ \l -> do
+          unless (T.null l) $ dispWord l
+          dispLine
+    | otherwise = do
+        dispWord $ "< EOF\n" <> s <> "EOF"
+        dispLine
+  disp Empty = dispLine
 
 
-type Parser = ReaderT (Maybe Pos) (Parsec Void Text)
+type Parser = ReaderT Pos (Parsec Void Text)
 type ParserError = ParseErrorBundle Text Void
 
-lineComment :: Parser ()
-lineComment = L.skipLineComment "#"
-
 sc :: Parser ()
-sc = L.space (void space1) lineComment empty
+sc = L.space (void space1) lineComment empty where
+  lineComment = L.skipLineComment "#"
 
 space1 :: Parser Text
 space1 = takeWhile1P Nothing (== ' ')
@@ -132,20 +137,51 @@ lexeme = L.lexeme sc
 symbol :: Text -> Parser Text
 symbol = L.symbol sc
 
+endln :: Parser ()
+endln = skipMany $ symbol "\n"
+
+endln1 :: Parser ()
+endln1 = skipSome $ symbol "\n"
+
+indentGuard :: Ordering -> Pos -> Parser Pos
+indentGuard = L.indentGuard $ pure ()
+
+indented :: Parser a -> Parser a
+indented p = do
+  ref <- ask
+  act <- L.indentLevel
+  if act < ref
+    then L.incorrectIndent GT ref act
+    else local (const act) p
+
+indentSome :: Parser a -> Parser [a]
+indentSome p = do
+  endln
+  indented $ do
+    ind <- ask
+    leader <- p
+    follow <- many $ indentGuard EQ ind *> p
+    pure $ leader : follow
+
 line :: Parser Text
 line = takeWhileP (Just "character") (/= '\n') <* newline
 
-endline :: Parser Text
-endline = symbol "\n"
+indentStr :: Parser Text
+indentStr = do
+  _ <- newline
+  empties <- many emptyLn
+  prefix <- space
+  indented $ do
+    leader <- line
+    follow <- many $ emptyLn <|> (chunk prefix *> line)
+    pure . T.unlines $ empties ++ (leader : follow)
+  where emptyLn = T.empty <$ newline
 
-indentBlock :: Parser a -> Parser a
-indentBlock p = do
-  (rel, ref) <- asks $ maybe (EQ, pos1) (GT,)
-  act <- L.indentGuard (pure ()) rel ref
-  local (const $ Just act) p
-
-parens :: Parser a -> Parser a
-parens = between (symbol "(") (symbol ")")
+heredocStr :: Parser Text
+heredocStr = do
+  end <- line
+  lns <- line `manyTill` chunk (end <> "\n")
+  pure $ T.unlines lns
 
 word :: Parser Text
 word = lexeme $ ident <|> quote where
@@ -154,45 +190,23 @@ word = lexeme $ ident <|> quote where
   sing = single '\'' *> (anySingle `manyTill` single '\'')
   doub = single '"' *> (L.charLiteral `manyTill` single '"')
 
-indentStr :: Parser Text
-indentStr = do
-  _ <- newline
-  empties <- many emptyLn
-  prefix <- space
-  rest <- option [] . indentBlock $ do
-    leader <- line
-    follow <- many $ emptyLn <|> (chunk prefix *> line)
-    pure $ leader : follow
-  sc
-  pure . T.unlines $ empties ++ rest
-  where
-    emptyLn = T.empty <$ newline
-
-heredocStr :: Parser Text
-heredocStr = do
-  end <- line
-  lns <- line `manyTill` chunk (end <> "\n")
-  _ <- space
-  pure $ T.unlines lns
-
-subject :: Parser Conf
-subject = CRec <$> record <|> CStr <$> (indent <|> heredoc) where
-  record = symbol "|" *> item
-  indent = symbol ">" *> indentStr
-  heredoc = symbol "<" *> heredocStr
-
-item :: Parser Record
-item = do
-  args <- many $ CStr <$> word <|> CRec <$> parens item
-  subj <- toList <$> optional subject
-  Record (args ++ subj) <$> block
+field :: Parser (Text, Record)
+field = liftA2 (,) word record
 
 block :: Parser Block
-block = skipMany endline *> (Block <$> many field) where
-  field = indentBlock $ liftA2 (,) word item
+block = choice
+  [ Fields <$> (symbol "\\" *> indentSome field)
+  , Rec <$> (symbol "|" *> record)
+  , Str <$> (str <* sc <* endln)
+  , Empty <$ endln1
+  ] where
+  str = (symbol ">" *> indentStr) <|> (symbol "<" *> heredocStr)
+
+record :: Parser Record
+record = Record <$> many word <*> block
 
 parse :: Parser a -> String -> Text -> Either ParserError a
-parse p = runParser $ runReaderT (sc *> p <* eof) Nothing
+parse p = runParser $ runReaderT (sc *> p <* eof) pos1
 
 main :: IO ()
 main = do
@@ -200,9 +214,9 @@ main = do
     []     -> ("<stdin>",) <$> T.getContents
     [path] -> (path,) <$> T.readFile path
     _      -> die "expect 0 or 1 args"
-  ast <- case parse block path src of
+  ast <- case parse record path src of
     Left err -> do
       hPutStr stderr $ errorBundlePretty err
       exitFailure
     Right ast -> pure ast
-  T.putStrLn . display $ disp ast
+  T.putStr . display $ disp ast
