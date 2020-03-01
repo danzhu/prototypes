@@ -16,6 +16,7 @@ import           Control.Monad.State.Lazy (get, put)
 import           Control.Monad.Writer.Lazy (tell)
 import           Data.Char (isAlphaNum)
 import           Data.Foldable (for_)
+import           Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.Set as Set
 import           Data.Text (Text)
 import qualified Data.Text as T
@@ -35,7 +36,7 @@ data Record = Record [Text] Block
   deriving (Show)
 
 data Block
-  = Fields [(Text, Record)]
+  = Fields (NonEmpty (Text, Record))
   | Str Text
   | Rec Record
   | Empty
@@ -154,14 +155,14 @@ indented p = do
     then L.incorrectIndent GT ref act
     else local (const act) p
 
-indentSome :: Parser a -> Parser [a]
+indentSome :: Parser a -> Parser (NonEmpty a)
 indentSome p = do
   endln
   indented $ do
     ind <- ask
     leader <- p
     follow <- many $ indentGuard EQ ind *> p
-    pure $ leader : follow
+    pure $ leader :| follow
 
 line :: Parser Text
 line = takeWhileP (Just "character") (/= '\n') <* newline
@@ -180,8 +181,7 @@ indentStr = do
 heredocStr :: Parser Text
 heredocStr = do
   end <- line
-  lns <- line `manyTill` chunk (end <> "\n")
-  pure $ T.unlines lns
+  T.unlines <$> line `manyTill` chunk (end <> "\n")
 
 word :: Parser Text
 word = lexeme $ ident <|> quote where
