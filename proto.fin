@@ -608,3 +608,44 @@ match [..., patt, ...] list = choice $ map (match patt) list
 # now, naive implementation would have horrible performance,
 # so to make this useful outer pattern may need to inspect inner pattern,
 # and optimize based on that
+
+
+# === type-safe sql with arrays ===
+# type-safe: multiplicity
+# I: Identity
+# O: Optional
+# N: NonEmpty
+# L: List
+
+# join:
+# I x = x
+# O O = O
+# O N = L
+# O L = L
+# N N = N
+# N L = L
+# L L = L
+
+# foreign key:
+get_user : Id User -> Identity User
+
+# array
+# sql
+create table user
+( id integer primary key
+);
+create table email
+( user integer references user (id)
+, email varchar
+);
+select user, email
+from email
+where email = "<email>";
+# array-sql
+User
+    id Identity Int
+    email NonEmpty Email
+query
+    user <- users
+    user.email == "<email>"
+    user
