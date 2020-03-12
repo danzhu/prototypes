@@ -649,3 +649,35 @@ query
     user <- users
     user.email == "<email>"
     user
+
+
+# === world state with functional update ===
+# if values track their origin,
+# then we can model world state (e.g. filesystem) with functional updates
+# (i.e. producing a new value instead of mutation)
+# and still be efficient by not doing unnecessary work
+
+# e.g. create file:
+over (dir "some_path") $ insert "foo.txt" $ File 644 "content"
+# input -> output:
+<world_fs> -> { "foo.txt": File 644 "content", ...<world_fs> }
+# and thus we know original files in the dir need not to be updated;
+# only "foo.txt" needs to be created
+
+# this can extend to e.g. copying files:
+\fs -> insert "b" (fs ! "a") fs
+
+# moving (and swapping) is a lot tricker:
+# harder to detect and ordering is important.
+# one inefficient way is to just load into memory before performing operations,
+# (which is essentially copying even when moving is possible)
+
+# idea is similar to Haskell's IO monad:
+# instead of functions having side effects (IO) or working on read data (here),
+# they work on and produce *descriptions*,
+# which then is "executed" by a (stateful) interpreter
+
+# additionally, origin info can be used to track incremental build:
+# since all of the values used to produce a result are dependencies.
+# although, this needs to also include code used to produce the value,
+# so it's not entirely the same
