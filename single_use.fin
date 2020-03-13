@@ -1,0 +1,24 @@
+def fib n = fib_loop 0 1 n
+
+def fib_loop a b n ? mov n1
+    | 0 = fib_end a b n2
+    | _ = fib_body a b n2
+    dup n -> n1 n2
+
+def fib_body a b n = fib_loop b1 (add a b2) (sub n 1)
+    dup b -> b1 b2
+
+def fib_end a b n = mov a
+    del b
+    del n
+
+
+def wc p = wc_loop 0 (open p)
+
+def wc_loop n f ? mov r
+    | Some b = wc_loop (add n 1) g
+    | None   = wc_done n g
+    read f -> r g
+
+def wc_done n f = mov n
+    close f
