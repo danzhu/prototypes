@@ -83,9 +83,16 @@ export class Wait<T> {
         return true
     }
 
+    broadcast(value: T): void {
+        for (const sync of this.wait)
+            sync.resolve(value)
+        this.wait = []
+    }
+
     close(reason: any): void {
         for (const sync of this.wait)
             sync.reject(reason)
+        this.wait = []
     }
 }
 
