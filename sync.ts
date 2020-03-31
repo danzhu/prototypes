@@ -146,7 +146,7 @@ export class Queue<T> implements AsyncIterable<T>, AsyncIterator<T, void> {
         return this
     }
 
-    get closed(): boolean { return this.closed }
+    get closed(): boolean { return this._closed }
 
     get length(): number { return this.buffer.length }
 }
