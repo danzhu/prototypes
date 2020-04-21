@@ -1,0 +1,8 @@
+{
+    .str -> {.append -> append}
+} -> {
+    tcp -> tcp.listen "9000"
+} {
+    .listen -> {port -> append "socket on port " port}
+    .accept -> {socket -> "accept"}
+}
