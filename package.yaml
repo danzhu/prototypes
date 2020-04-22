@@ -36,3 +36,12 @@ executables:
     main: Multiplicity.hs
     dependencies:
       - mtl
+  FunctionRecord:
+    main: FunctionRecord.hs
+    dependencies:
+      - containers
+      - megaparsec
+      - mtl
+      - parser-combinators
+      - text
+      - transformers

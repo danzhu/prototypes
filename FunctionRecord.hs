@@ -1,7 +1,12 @@
+{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE GADTs             #-}
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections     #-}
+
+module Main
+  ( main
+  ) where
 
 import           Control.Applicative (empty, liftA2, (<|>))
 import           Control.Monad (void)
@@ -9,8 +14,12 @@ import           Control.Monad.Combinators (between, choice, manyTill, sepEndBy,
                                             skipMany, skipSome)
 import           Control.Monad.Combinators.Expr (Operator (InfixL),
                                                  makeExprParser)
+import           Control.Monad.Except (throwError)
+import           Control.Monad.Reader (ReaderT, ask, asks, local, runReaderT)
+import           Control.Monad.Trans.Class (lift)
+import           Control.Monad.Trans.Maybe (MaybeT (MaybeT), runMaybeT)
 import           Data.Char (isAlphaNum)
-import           Data.Maybe (mapMaybe)
+import           Data.Foldable (asum)
 import qualified Data.Set as Set
 import           Data.String (IsString, fromString)
 import           Data.Text (Text)
@@ -34,12 +43,14 @@ newtype Sym = Sym Text
 
 type Block a b = [(a, b)]
 
+type Abs = Block Patt Expr
+
 data Expr
   = EVar Var
   | ESym Sym
   | EStr Text
   | EApp Expr Expr
-  | EAbs (Block Patt Expr)
+  | EAbs Abs
   deriving (Show)
 
 data Patt
@@ -48,8 +59,6 @@ data Patt
   | PStr Text
   | PAbs (Block Expr Patt)
   deriving (Show)
-
-type Func = Block Patt Expr
 
 instance Show Var where
   show (Var var) = T.unpack var
@@ -98,15 +107,15 @@ pVar = Var <$> pId
 pSym :: Parser Sym
 pSym = Sym <$> (single '.' *> pId)
 
-pFunc :: Parser Func
-pFunc = pBlock pPatt pExpr
+pAbs :: Parser Abs
+pAbs = pBlock pPatt pExpr
 
 pAtom :: Parser Expr
 pAtom = choice
   [ EVar <$> pVar
   , ESym <$> pSym
   , EStr <$> pStr
-  , EAbs <$> braces pFunc
+  , EAbs <$> braces pAbs
   ]
 
 pExpr :: Parser Expr
@@ -133,7 +142,18 @@ parse p = runParser $ sc *> p <* eof
 data Val
   = VSym Sym
   | VStr Text
-  | VFun (Val -> Val)
+  | VFun Fun
+
+data Fail
+  = NoVar Var
+  | NotFun Val
+  | NoMatch Val
+
+type Ctx = [(Var, Val)]
+
+type Eval = ReaderT Ctx (Either Fail)
+
+type Fun = Val -> MaybeT (Either Fail) Val
 
 instance Show Val where
   show = \case
@@ -141,44 +161,69 @@ instance Show Val where
     VStr s -> show s
     VFun _ -> "<func>"
 
-type Ctx = [(Var, Val)]
+instance Show Fail where
+  show = \case
+    NoVar var -> "no such variable: " ++ show var
+    NoMatch val -> "no matching clause for: " ++ show val
+    NotFun val -> "applying non-function: " ++ show val
 
-abstract :: Ctx -> Func -> Val
-abstract ctx arms = VFun $ \arg -> do
-  let matchArm (p, e) = (, e) <$> match ctx p arg
-  case mapMaybe matchArm arms of
-    (ctx', expr) : _ -> interpret (ctx' <> ctx) expr
-    [] -> error $ "interpret: no matching clause for " ++ show arg ++ " in function: " ++ show arms
+runEval :: Eval a -> Ctx -> Either Fail a
+runEval = runReaderT
 
-interpret :: Ctx -> Expr -> Val
-interpret ctx = \case
-  ESym sym -> VSym sym
-  EStr str -> VStr str
-  EVar var -> case lookup var ctx of
-    Just v  -> v
-    Nothing -> error $ "interpret: no such variable: " ++ show var
-  EApp fun arg -> case interpret ctx fun of
-    VFun f -> f $ interpret ctx arg
-    v      -> error $ "interpret: applying non-function: " ++ show v
-  EAbs blk -> abstract ctx blk
+abstract :: Abs -> Eval Fun
+abstract arms = asks $ \ctx arg -> do
+  let assign (patt, expr) = do
+        ctx' <- match patt arg
+        lift $ local (ctx' <>) $ interpret expr
+      run = asum $ map assign arms
+  MaybeT $ runEval (runMaybeT run) ctx
 
-match :: Ctx -> Patt -> Val -> Maybe Ctx
-match _ (PVar var) val = Just [(var, val)]
-match _ (PSym p) (VSym v)
-  | p == v = Just []
-match _ (PStr p) (VStr v)
-  | p == v = Just []
-match ctx (PAbs p) (VFun v) = concat <$> traverse assign p where
-  assign (expr, patt) = match ctx patt $ v $ interpret ctx expr
-match _ _ _ = Nothing
+interpret :: Expr -> Eval Val
+interpret = \case
+  ESym sym -> pure $ VSym sym
+  EStr str -> pure $ VStr str
+  EVar var -> asks (lookup var) >>= \case
+    Just v  -> pure v
+    Nothing -> throwError $ NoVar var
+  EApp fun arg -> interpret fun >>= \case
+    VFun f -> do
+      a <- interpret arg
+      lift (runMaybeT $ f a) >>= \case
+        Just v -> pure v
+        Nothing -> throwError $ NoMatch a
+    v      -> throwError $ NotFun v
+  EAbs blk -> VFun <$> abstract blk
+
+match :: Patt -> Val -> MaybeT Eval Ctx
+match (PVar var) val = pure [(var, val)]
+match (PSym p) (VSym v)
+  | p == v = pure []
+match (PStr p) (VStr v)
+  | p == v = pure []
+match (PAbs arms) (VFun fun) = concat <$> traverse assign arms where
+  assign :: (Expr, Patt) -> MaybeT Eval Ctx
+  assign (expr, patt) = do
+    arg <- lift $ interpret expr
+    res <- MaybeT $ lift $ runMaybeT $ fun arg
+    match patt res
+match _ _ = empty
 
 context :: Ctx
 context = []
 
 root :: Val
-root = VFun $ \case
-  VSym "str" -> VFun $ \case
-        VSym "append" -> VFun $ \(VStr s) -> VFun $ \(VStr t) -> VStr $ s <> t
+root = fn sym $ \case
+  "str" -> pure . fn sym $ \case
+    "append" -> pure . fn str $ \s -> pure . fn str $ \t -> pure . VStr $ s <> t
+    _ -> empty
+  _ -> empty
+  where
+    fn :: (Val -> Maybe a) -> (a -> MaybeT (Either Fail) Val) -> Val
+    fn c f = VFun $ maybe empty f . c
+    str (VStr s) = Just s
+    str _        = Nothing
+    sym (VSym s) = Just s
+    sym _        = Nothing
 
 main :: IO ()
 main = do
@@ -186,11 +231,15 @@ main = do
     []     -> ("<stdin>",) <$> T.getContents
     [path] -> (path,) <$> T.readFile path
     _      -> die "expect 0 or 1 args"
-  ast <- case parse pFunc path src of
+  ast <- case parse pAbs path src of
     Left err -> do
       hPutStr stderr $ errorBundlePretty err
       exitFailure
     Right ast -> pure ast
   print ast
-  let VFun f = interpret context $ EAbs ast
-  print $ f root
+  let run = do
+        f <- runEval (abstract ast) context
+        runMaybeT $ f root
+  case run of
+    Right res -> print res
+    Left err  -> print err
