@@ -928,3 +928,131 @@ additionally, origin info can be used to track incremental build:
 since all of the values used to produce a result are dependencies.
 although, this needs to also include code used to produce the value,
 so it's not entirely the same
+
+
+## sync and async monad
+
+Most languages with `async`/`await` suffers from having to choose:
+1. sync code: cannot block on async, so more limited
+2. async code: syntax heavy, so harder to write
+
+Since promises/futures are monads, point 2 is not a problem in Haskell
+as `IO` is a monad anyways.
+So an alternative, promise/future-based Haskell can have async IO by default,
+and a sync monad for synchronous operations (useful for e.g. critical section):
+
+``` haskell
+readLine :: Async String
+writeLine :: String -> Async ()
+readVar :: Var a -> Sync a
+writeVar :: Var a -> a -> Sync ()
+sync :: Sync a -> Async a
+```
+
+This is analogous to `IO` vs `STM` - former more general and often used,
+latter for guarantee of atomicity / no context switch.
+
+
+## database identity vs value
+
+Identity as a special type/property like ML ref;
+database is otherwise immutable.
+
+``` fin
+User
+    name Ref String
+
+Room
+    users Ref (List User)
+
+Message
+    user User
+    room Room
+    text Ref String
+```
+
+This maps better to languages like ML and Haskell,
+but worse for languages with re-assignable fields.
+
+Alternatively, a coarse-grained database update implementation can support
+full-row updates only,
+which would correspond to an ref for the whole record.
+This also simplifies ORM and avoids partial updates.
+
+
+## dynamic (function) modules/objects
+
+Normally invoking a (non-closure) function involves
+a path (module/object + name) and argument(s).
+This is (usually) the same as first getting/creating closure,
+and then apply closure on arguments:
+
+``` haskell
+Foo.bar 1 == (Foo.bar) 1
+```
+
+``` python
+foo.bar(1) == (foo.bar)(1)
+```
+
+What if we associate the other way? i.e. combine name and arguments first,
+and then apply the module/object on the call?
+
+``` fin
+net = \
+    .tcp -> \
+        .listen{port} -> ...
+        .accept{socket, timeout} -> ...
+
+socket = net.tcp.listen{8000}
+mod = net.tcp
+op = .accept{socket, 1000}
+mod op
+```
+
+In this way, a module/object is a function that accepts messages,
+much like Erlang/Elixir processes.
+The module/object can then decide to e.g. forward the message (re-export),
+therefore making proxy/reflection trivial without language/library support.
+
+One downside is that this requires compound values,
+and modules/objects are also like compound values,
+so either:
+1. language supports compound values, making this kind of pointless, or
+2. use atoms/symbols as keys first to build records,
+   and then use the records for module/object function/methods;
+   which seems quite unnecessary.
+   
+So alternatively one can forgo the idea of keeping name and arguments together,
+and just do curried application for both function fetching and application:
+
+``` fin
+Tcp = \
+    .listen -> Int -> Socket
+    .accept -> Socket -> Int -> Socket
+tcp : (F : .listen | .accept) -> Tcp F = \
+    .listen port -> ...
+    .accept socket timeout -> ...
+
+socket = tcp.listen 8000
+m = .accept
+{conn = m socket 100} = tcp
+```
+
+This syntax removes the need to separate static/computed property access:
+property access is just function application on atom/symbol.
+
+
+## function call end marker
+
+One downside of currying is that functions don't (natively) support variable
+number of arguments.
+One can use compound structure (list/map/record) for this purpose,
+or a special marker value (possibly also syntax) to mark end of arguments:
+
+``` fin
+add 1 2 .
+```
+
+Nevertheless this makes currying lose most of its benefits:
+`f a b . != (f a .) b .` unless `f` ignores `.` at 1 argument.
