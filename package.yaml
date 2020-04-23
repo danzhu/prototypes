@@ -45,3 +45,7 @@ executables:
       - parser-combinators
       - text
       - transformers
+  ContChain:
+    main: ContChain.hs
+    dependencies:
+      - transformers
