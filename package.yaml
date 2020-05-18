@@ -49,3 +49,7 @@ executables:
     main: ContChain.hs
     dependencies:
       - transformers
+  ContResource:
+    main: ContResource.hs
+    dependencies:
+      - transformers
