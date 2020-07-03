@@ -1,111 +1,158 @@
-// TODO:
-// helper for state across rebuilds
-// inactive streams
-
 const log = (msg, tar) => {
-    console.log(`${msg}`, tar.build ? tar.build.val : '<handle>')
+    console.log(`${msg}: ${tar.name} =`, tar.build ? tar.build.val : '<handle>')
 }
 
-const State = () => ({ stack: [], written: new Set(), writing: false })
+const Context = (init = []) => {
+    const stack = Array.from(init)
 
-const Target = (state, build = null, write = null) => {
-    const target = { build: null, write }
-    if (build !== null) {
-        target.build = { ...build, deps: new Set(), affs: new Set() }
-        target.build.val = with_build(state, target, target.build.create)
+    const local = (target, f) => {
+        stack.push(target)
+        try {
+            return f()
+        } finally {
+            const t = stack.pop()
+            if (t !== target)
+                throw new Error('mismatched stack')
+        }
+    }
+
+    const top = () => {
+        if (stack.length === 0)
+            throw new Error('empty stack')
+        return stack[stack.length - 1]
+    }
+
+    return { local, top }
+}
+
+const State = () => ({
+    kind: 'idle',
+    targets: Context(),
+    pend_build: [],
+    changed: null,
+})
+
+const Target = (state, name, { update, destroy, write }) => {
+    const target = { name, build: null }
+
+    if (update !== undefined) {
+        target.build = { outdated: true, deps: new Set(), affs: new Set() }
+
+        target.untracked_get = () => target.build.val
+
         target.get = () => {
-            when_build(state, active => {
+            if (state.kind === 'build') {
+                target.update()
+                const active = state.targets.top()
                 active.build.deps.add(target)
                 target.build.affs.add(active)
-            })
-            return target.build.val
+            }
+            return target.untracked_get()
         }
+
+        target.update = () => {
+            const ch = state.changed.get(target)
+            if (ch !== undefined) {
+                if (ch === 'changing')
+                    throw new Error('dependency cycle detected')
+                return ch === 'changed'
+            }
+            log('checking', target)
+            state.changed.set(target, 'changing')
+            if (
+                target.build.outdated
+                    || Array.from(target.build.deps).some(dep => dep.update())
+            ) {
+                for (const dep of target.build.deps)
+                    dep.build.affs.delete(target)
+
+                log('updating', target)
+                target.build.val = state.targets.local(target, update)
+                target.build.outdated = false
+
+                log('updated', target)
+                state.changed.set(target, 'changed')
+
+                run_build(state)
+                for (const aff of target.build.affs)
+                    aff.update()
+                return true
+            } else {
+                log('up to date', target)
+                state.changed.set(target, 'unchanged')
+                return false
+            }
+        }
+
+        state.pend_build.push(target)
     }
-    if (target.write !== null) {
+
+    if (write !== undefined) {
+        if (typeof write !== 'function')
+            throw new Error('invalid write')
+
         target.set = val => {
-            when_build(state, () => {
-                throw new Error('cannot set when building')
-            })
+            if (state.kind === 'build')
+                throw new Error('cannot write when building')
+            const clean = state.kind === 'idle'
+            if (clean) {
+                console.log('entering write')
+                state.kind = 'write'
+            }
+
             log('writing', target)
-            with_write(state, target, () => { target.write(val) })
+            write(val)
+            if (target.build !== null) {
+                target.build.outdated = true
+                state.pend_build.push(target)
+            }
+
+            if (clean) {
+                console.log('exiting write')
+                state.kind = 'idle'
+                run_build(state)
+            }
         }
     }
+
     target.destroy = () => {
+        log('destroying', target)
         if (target.build === null)
             return
+        if (target.build.affs.size !== 0)
+            throw new Error('destroying target in use')
         for (const dep of target.build.deps)
             dep.build.affs.delete(target)
-        target.build.destroy()
+        if (destroy !== undefined)
+            destroy()
     }
+
+    log('created', target)
     return target
 }
 
-const when_build = (state, f) => {
-    if (state.stack.length === 0)
-        return
-    f(state.stack[state.stack.length - 1])
-}
-
-const with_build = (state, target, f) => {
-    state.stack.push(target)
-    try {
-        return f()
-    } finally {
-        const t = state.stack.pop()
-        if (t !== target)
-            throw new Error('mismatched stack')
-    }
-}
-
-const with_write = (state, target, f) => {
-    const clean = !state.writing
-    state.writing = true
-    f()
-    if (target.build !== null)
-        state.written.add(target)
-    if (clean) {
-        state.writing = false
-        run_build(state)
-    }
-}
-
 const run_build = state => {
-    const changed = new Map()
-
-    const update = target => {
-        const ch = changed.get(target)
-        if (ch !== undefined) {
-            if (ch === 'changing')
-                throw new Error('dependency cycle detected')
-            return ch === 'changed'
-        }
-        log('building', target)
-        changed.set(target, 'changing')
-        let updated = false
-        if (
-            state.written.has(target)
-                || Array.from(target.build.deps).some(dep => update(dep))
-        ) {
-            for (const dep of target.build.deps)
-                dep.build.affs.delete(target)
-            target.build.val = with_build(state, target, target.build.update)
-            updated = true
-        }
-        if (updated) {
-            log('updated', target)
-            changed.set(target, 'changed')
-            for (const aff of target.build.affs)
-                update(aff)
-        } else {
-            log('up to date', target)
-            changed.set(target, 'unchanged')
-        }
-        return updated
+    if (state.kind === 'write')
+        throw new Error('cannot build when writing')
+    const clean = state.kind === 'idle'
+    if (clean) {
+        console.log('entering build')
+        state.kind = 'build'
+        state.changed = new Map()
     }
 
-    for (const target of state.written)
-        update(target)
-    state.written = new Set()
+    const pend = state.pend_build
+    state.pend_build = []
+    for (const target of pend)
+        target.update()
+
+    if (state.pend_build.length !== 0)
+        throw new Error('unfinished build')
+    if (clean) {
+        console.log('exiting build')
+        state.kind = 'idle'
+        state.changed = null
+    }
 }
 
 
@@ -121,34 +168,82 @@ const Arena = () => {
     return { defer, destroy }
 }
 
-const Context = () => ({ arena: Arena(), state: State() })
+const UiContext = () => ({ arenas: Context([Arena()]), state: State() })
 
-const target = (context, build, write) => {
-    const target =  Target(context.state, build, write)
-    context.arena.defer(() => { target.destroy() })
+const run = context => run_build(context.state)
+
+const defer = (context, f) => context.arenas.top().defer(f)
+
+const new_target = (context, name, opts) => {
+    const target = Target(context.state, name, opts)
+    defer(context, () => { target.destroy() })
     return target
 }
 
-const stream = (context, read, write = null) => {
+const stream = (context, name, build, write) => {
     let arena = null
-    const create = () => {
+    const update = () => {
+        if (arena !== null)
+            arena.destroy()
         arena = Arena()
-        return read({ ...context, arena })
+        return context.arenas.local(arena, build)
     }
     const destroy = () => { arena.destroy() }
-    const update = () => {
-        destroy()
-        return create()
-    }
-    const build = { create, update, destroy }
-    return target(context, build, write)
+    return new_target(context, name, { update, destroy, write })
 }
 
-const handle = (context, write) => target(context, null, write)
+const collection = (context, name, build) => {
+    let arena = null
+    let cache = new Map()
+    const update = () => {
+        const new_cache = new Map()
+        const reuse = (key, val, f) => {
+            if (new_cache.has(key))
+                throw new Error('repeated keys')
+            let entry = cache.get(key)
+            if (entry === undefined) {
+                const arena = Arena()
+                const ret = context.arenas.local(arena, () => {
+                    const tar = stream(context, `key/${key}`, () => {
+                        // HACK: force update when target changed,
+                        // required since we are accessing internal state `cache`
+                        target.get()
+                        return cache.get(key).val
+                    })
+                    return f(tar)
+                })
+                entry = { arena, ret }
+            }
+            new_cache.set(key, { ...entry, val })
+            return entry.ret
+        }
 
-const pure = (ctx, val) => stream(ctx, () => val)
+        if (arena !== null)
+            arena.destroy()
+        arena = Arena()
+        const ret = context.arenas.local(arena, () => build(reuse))
 
-const mut = (ctx, val) => stream(ctx, () => val, v => { val = v })
+        for (const [key, { arena }] of cache.entries()) {
+            if (!new_cache.has(key))
+                arena.destroy()
+        }
+        cache = new_cache
+        return ret
+    }
+    const destroy = () => {
+        for (const { arena } of cache.values())
+            arena.destroy()
+        arena.destroy()
+    }
+    const target = new_target(context, name, { update, destroy })
+    return target
+}
+
+const handle = (context, name, write) => new_target(context, name, { write })
+
+const pure = (context, val) => stream(context, 'pure', () => val)
+
+const mut = (context, name, val) => stream(context, name, () => val, v => { val = v })
 
 
 // === example ===
@@ -160,14 +255,14 @@ const submit = ({ id, code, lang }, cb) => {
 const element = (ctx, tag, { value, children } = {}) => {
     const elem = document.createElement(tag)
     if (value !== undefined) {
-        stream(ctx, ctx => { elem.value = value.get() })
+        stream(ctx, 'value', () => elem.value = value.get())
         elem.addEventListener('change', () => { value.set(elem.value) })
     }
     if (children !== undefined) (
-        stream(ctx, ctx => {
+        stream(ctx, 'children', () => {
             for (const c of children.get())
                 elem.appendChild(c)
-            ctx.arena.defer(() => {
+            defer(ctx, () => {
                 while (elem.firstChild)
                     elem.removeChild(elem.lastChild)
             })
@@ -178,7 +273,13 @@ const element = (ctx, tag, { value, children } = {}) => {
 
 const Text = (ctx, text) => {
     const elem = document.createTextNode('')
-    stream(ctx, ctx => { elem.textContent = text.get() })
+    stream(ctx, 'textContent', () => elem.textContent = text.get())
+    return [elem]
+}
+
+const Html = (ctx, html) => {
+    const elem = element(ctx, 'section')
+    stream(ctx, 'innerHTML', () => elem.innerHTML = html.get())
     return [elem]
 }
 
@@ -197,7 +298,7 @@ const Editor = (ctx, { text }) => {
 }
 
 const Select = (ctx, { value, options }) => {
-    const children = stream(ctx, ctx => options.get().map(({ id, name }) => {
+    const children = stream(ctx, 'options', () => options.get().map(({ id, name }) => {
         const o = document.createElement('option')
         o.value = id
         o.textContent = name
@@ -212,29 +313,29 @@ const Code = (ctx, { text }) => {
 
 const Tabs = (ctx, { index }, tabs) => {
     return Container(ctx, {}, pure(ctx, [
-        Container(ctx, {}, stream(ctx, ctx => tabs.get().flatMap(({ name }, i) => {
-            const action = handle(ctx, () => index.set(i))
+        Container(ctx, {}, stream(ctx, 'tabs', () => tabs.get().flatMap(({ name }, i) => {
+            const action = handle(ctx, 'select_tab', () => index.set(i))
             return Button(ctx, { action }, pure(ctx, Text(ctx, name)))
         }))),
-        Container(ctx, {}, stream(ctx, ctx => tabs.get()[index.get()].content)),
+        Container(ctx, {}, stream(ctx, 'active_tab', () => tabs.get()[index.get()].content)),
     ].flat()))
 }
 
 const Problem = (ctx, { id, code, solution, langs }) => {
-    const lang = mut(ctx, langs.get()[0].id)
-    const results = mut(ctx, 'run to see test results')
+    const lang = mut(ctx, 'lang', langs.untracked_get()[0].id)
+    const results = mut(ctx, 'run_result', 'run to see test results')
     const edit = stream(
-        ctx,
-        ctx => code.get()[lang.get()],
+        ctx, 'code',
+        () => code.get()[lang.get()],
         v => { code.set({ ...code.get(), [lang.get()]: v }) },
     )
     return Container(ctx, {}, pure(ctx, [
-        Tabs(ctx, { index: mut(ctx, 0) }, pure(ctx, [{
+        Tabs(ctx, { index: mut(ctx, 'tab_index', 0) }, pure(ctx, [{
             name: pure(ctx, 'Editor'),
             content: [
                 Editor(ctx, { text: edit }),
                 Button(ctx, {
-                    action: handle(ctx, () => {
+                    action: handle(ctx, 'run', () => {
                         results.set('running...')
                         const data = { id, code: edit.get(), lang: lang.get() }
                         submit(data, r => { results.set(r) })
@@ -245,7 +346,7 @@ const Problem = (ctx, { id, code, solution, langs }) => {
         }, {
             name: pure(ctx, 'Solution'),
             content: Code(ctx, {
-                text: stream(ctx, ctx => solution.get()[lang.get()]),
+                text: stream(ctx, 'solution', () => solution.get()[lang.get()]),
             }),
         }])),
         Select(ctx, { value: lang, options: langs }),
@@ -253,17 +354,17 @@ const Problem = (ctx, { id, code, solution, langs }) => {
 }
 
 const Main = (ctx, { content, langs }) => {
-    return Container(ctx, {}, stream(ctx, ctx => content.get().flatMap(c => {
+    return Container(ctx, {}, collection(ctx, 'sections', reuse => content.get().flatMap(c => {
         switch (c.kind) {
-        case 'text':
-            return Text(ctx, pure(ctx, c.text))
-        case 'code':
-            return Problem(ctx, {
+        case 'html':
+            return Html(ctx, pure(ctx, c.text))
+        case 'problem':
+            return reuse(c.id, c, p => Problem(ctx, {
                 id: c.id,
-                code: mut(ctx, c.starter),
-                solution: pure(ctx, c.solution),
+                code: mut(ctx, 'codes', c.starter),
+                solution: stream(ctx, 'solutions', () => p.get().solution),
                 langs,
-            })
+            }))
         default:
             throw new Error(`invalid kind ${c.kind}`)
         }
@@ -279,10 +380,10 @@ const DATA = {
         name: 'JavaScript',
     }],
     content: [{
-        kind: 'text',
-        text: 'content',
+        kind: 'html',
+        text: '<h1>Title</h1><p>content</p>',
     }, {
-        kind: 'code',
+        kind: 'problem',
         id: 'print',
         starter: {
             python: `\
@@ -304,11 +405,17 @@ console.log('content')
 }
 
 const main = () => {
-    const ctx = Context()
-    const content = pure(ctx, DATA.content)
-    const langs = pure(ctx, DATA.languages)
+    const ctx = UiContext()
+    const content = mut(ctx, 'content', DATA.content)
+    const langs = mut(ctx, 'languages', DATA.languages)
 
     for (const elem of Main(ctx, { content, langs }))
         document.body.appendChild(elem)
+    run(ctx)
+
+    return { ctx, content, langs }
 }
-main()
+const m = main()
+
+// TODO:
+// inactive streams
