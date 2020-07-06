@@ -5,13 +5,13 @@ const log = (msg, tar) => {
 const Context = (init = []) => {
     const stack = Array.from(init)
 
-    const local = (target, f) => {
-        stack.push(target)
+    const local = (val, f) => {
+        stack.push(val)
         try {
             return f()
         } finally {
             const t = stack.pop()
-            if (t !== target)
+            if (t !== val)
                 throw new Error('mismatched stack')
         }
     }
@@ -38,7 +38,11 @@ const Target = (state, name, { update, destroy, write }) => {
     if (update !== undefined) {
         target.build = { outdated: true, deps: new Set(), affs: new Set() }
 
-        target.untracked_get = () => target.build.val
+        target.untracked_get = () => {
+            if (!('val' in target.build))
+                throw new Error('get before first build')
+            return target.build.val
+        }
 
         target.get = () => {
             if (state.kind === 'build') {
@@ -88,9 +92,6 @@ const Target = (state, name, { update, destroy, write }) => {
     }
 
     if (write !== undefined) {
-        if (typeof write !== 'function')
-            throw new Error('invalid write')
-
         target.set = val => {
             if (state.kind === 'build')
                 throw new Error('cannot write when building')
@@ -117,12 +118,12 @@ const Target = (state, name, { update, destroy, write }) => {
 
     target.destroy = () => {
         log('destroying', target)
-        if (target.build === null)
-            return
-        if (target.build.affs.size !== 0)
-            throw new Error('destroying target in use')
-        for (const dep of target.build.deps)
-            dep.build.affs.delete(target)
+        if (target.build !== null) {
+            if (target.build.affs.size !== 0)
+                throw new Error('destroying target in use')
+            for (const dep of target.build.deps)
+                dep.build.affs.delete(target)
+        }
         if (destroy !== undefined)
             destroy()
     }
@@ -168,9 +169,13 @@ const Arena = () => {
     return { defer, destroy }
 }
 
-const UiContext = () => ({ arenas: Context([Arena()]), state: State() })
+const UiContext = () => {
+    const state = State()
 
-const run = context => run_build(context.state)
+    const run = () => run_build(state)
+
+    return { arenas: Context([Arena()]), state, run }
+}
 
 const defer = (context, f) => context.arenas.top().defer(f)
 
@@ -313,9 +318,9 @@ const Code = (ctx, { text }) => {
 
 const Tabs = (ctx, { index }, tabs) => {
     return Container(ctx, {}, pure(ctx, [
-        Container(ctx, {}, stream(ctx, 'tabs', () => tabs.get().flatMap(({ name }, i) => {
+        Container(ctx, {}, stream(ctx, 'tabs', () => tabs.get().flatMap(({ title }, i) => {
             const action = handle(ctx, 'select_tab', () => index.set(i))
-            return Button(ctx, { action }, pure(ctx, Text(ctx, name)))
+            return Button(ctx, { action }, pure(ctx, Text(ctx, title)))
         }))),
         Container(ctx, {}, stream(ctx, 'active_tab', () => tabs.get()[index.get()].content)),
     ].flat()))
@@ -331,7 +336,7 @@ const Problem = (ctx, { id, code, solution, langs }) => {
     )
     return Container(ctx, {}, pure(ctx, [
         Tabs(ctx, { index: mut(ctx, 'tab_index', 0) }, pure(ctx, [{
-            name: pure(ctx, 'Editor'),
+            title: pure(ctx, 'Editor'),
             content: [
                 Editor(ctx, { text: edit }),
                 Button(ctx, {
@@ -344,7 +349,7 @@ const Problem = (ctx, { id, code, solution, langs }) => {
                 Code(ctx, { text: results }),
             ].flat(),
         }, {
-            name: pure(ctx, 'Solution'),
+            title: pure(ctx, 'Solution'),
             content: Code(ctx, {
                 text: stream(ctx, 'solution', () => solution.get()[lang.get()]),
             }),
@@ -411,7 +416,7 @@ const main = () => {
 
     for (const elem of Main(ctx, { content, langs }))
         document.body.appendChild(elem)
-    run(ctx)
+    ctx.run()
 
     return { ctx, content, langs }
 }
