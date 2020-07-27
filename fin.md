@@ -1056,3 +1056,94 @@ add 1 2 .
 
 Nevertheless this makes currying lose most of its benefits:
 `f a b . != (f a .) b .` unless `f` ignores `.` at 1 argument.
+
+
+## overlay git
+
+overlay fs - similar to git branch
+
+``` haskell
+base :: Map Path File
+overlay :: Map Path (Maybe File)
+
+overlay :: Path -> Maybe File -> Maybe File
+```
+
+
+## plain text layout engine
+
+```
+func
+    margin-below 2
+```
+
+``` python
+def foo():
+    ...
+
+
+def bar():
+    ...
+```
+
+
+## first-class lens
+
+``` fin
+data sum Maybe a
+| Just a
+| Nothing ()
+
+data product Pair a b
+& first a
+& second b
+
+data alias List a
+= Maybe (Pair a (List a))
+
+data newtype Arg a b
+= Pair a b
+
+instance Eq (Arg a b) where
+  x == y = x ^. from Arg . #first == y ^. from Arg . #first
+```
+
+sum, product, alias like `GHC.Generics`: transparent and auto instances
+
+newtype has no auto instances
+
+constrained types:
+
+- `#first : Lens (Pair a c) (Pair b c) a b`
+- `#Just : Prism (Maybe a) (Maybe b) a b`
+- `Arg : Iso (Arg a b) (Arg c d) (Pair a b) (Pair c d)`
+
+general types:
+
+- `#first : HasLens "first" s t a b => Lens s t a b`
+- `#Just : HasPrism "Just" s t a b => Prism s t a b`
+- `Arg : Iso (Arg a b) (Arg c d) (Pair a b) (Pair c d)`
+
+sum and product has `OverloadedLabels`-like optics, thus public
+
+newtype just has an in-scope `Iso`, so private unless exported
+
+pattern matching is like `^?`, i.e. traverse and (maybe) get first
+
+``` fin
+maybe a #Nothing  = a
+maybe _ (#Just b) = b
+```
+
+``` haskell
+maybe a m
+  | Just _ <- m ^. _Nothing = a
+  | Just b <- m ^. _Just    = b
+```
+
+problem is partial check: sum types work out nicely:
+`HasLens "first" s => HasLens "second" s => ...`
+
+but for product types, we want to have constraints that either
+1. enforce no extra constructor
+2. leave a `Partial`-like marker
