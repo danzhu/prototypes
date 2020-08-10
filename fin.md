@@ -1147,3 +1147,88 @@ problem is partial check: sum types work out nicely:
 but for product types, we want to have constraints that either
 1. enforce no extra constructor
 2. leave a `Partial`-like marker
+
+
+## shell syntax
+
+2 modes: command and expression
+
+- `$` embeds expression in command
+- `()` embeds command output in expression
+- `{}` groups commands and expressions
+
+```
+# run('echo', PATH)
+echo $PATH
+# run('echo', output('pwd'))
+echo $(pwd)
+# run('echo', foo + 'bar')
+echo ${foo}bar
+```
+
+
+## navigation with pinning
+
+Navigation history is akin to undo history,
+so if we use vim's tree undo for navigation,
+we get a navigation tree
+(Nyxt browser does this).
+
+For contexts where each history point has state / is expensive to create
+(e.g. browser pages),
+and/or to allow multiple simultaneous views of a history tree,
+we could allow the user to "pin" a history point:
+Each pinned point has its state stored,
+and the user can be shown a history tree where only pinned points are visible.
+
+Pinning is conceptually closer to the user's intent:
+it expresses interest in the current view,
+i.e. "(may) need to revisit later";
+as opposed to tabs (even with tree style tabs)
+where they need to be more conscious of managing them.
+
+For example: the user searches for a term in their default search engine,
+and then opens the first link.
+After that they may:
+1. be satisfied with the search, and stop; or
+2. dislike the current result, go back and open the second link; or
+3. want more results, so keep current result and open the second link.
+
+For a tabbed interface, the user either opens links in:
+1. new tabs, which makes 1 leave an unused tab until manually closed
+2. same tab, which makes 3 difficult: either
+   1. duplicate tab (wasted page load), and go back; or
+   2. go back, and reopen both links
+      (again wasted page load + need to find link again).
+
+In contrast, pinning is straightforward:
+1. trivial case
+2. simply go back and open second link
+3. pin, and go back and open second link
+
+There are certainly ways to improve tabbed interfaces
+that solves/alleviates some of the problems above,
+but the pinning tree seems to be a cleaner model.
+
+*Problem*:
+if the search engine has paging,
+how to differentiate:
+- next page (should also move pin), and
+- content link (should keep pin in place).
+
+Potential solutions (may be combined):
+1. choose move/stay on each navigation
+   (similar to "open in current/new tab")
+2. paging (moving between sub-views of a large resource)
+   is different from opening a content link (new resource),
+   so links could include directives on which behaviour is preferred
+   (similar to link `target="_self"`/`target="_blank"`)
+   
+*Problem*:
+switching between views loses current view if not pinned.
+
+Potential solutions:
+1. simply warn the user
+2. have some kind of "soft pin" / active view status,
+   which prevents destruction of the state,
+   but always follows navigation.
