@@ -23,6 +23,29 @@ export function lock<T, R>(resource: Resource<T>, fn: (value: T) => Promise<R>):
     return resource.acquire().then(fn).finally(() => resource.release())
 }
 
+export function all<T>(ps: Promise<T>[]): Promise<T[]> {
+    return new Promise((res, rej) => {
+        const r: T[] = Array(ps.length)
+        let done = 0
+        for (let i = 0; i < ps.length; ++i) {
+            ps[i].then(v => {
+                r[i] = v
+                ++done
+                if (done === ps.length)
+                    res(r)
+            }, rej)
+        }
+    })
+}
+
+export function race<T>(ps: Promise<T>[]): Promise<T> {
+    return new Promise((res, rej) => {
+        for (const p of ps) {
+            p.then(res, rej)
+        }
+    })
+}
+
 export class EofError extends Error {
     constructor() {
         super('EOF reached')

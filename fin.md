@@ -1232,3 +1232,27 @@ Potential solutions:
 2. have some kind of "soft pin" / active view status,
    which prevents destruction of the state,
    but always follows navigation.
+
+
+## fs
+
+```
+make_file : a -> IO (File a)
+read_file : File a -> a
+
+make_ref : a -> IO (Ref a)
+read_ref : Ref a -> IO a
+write_ref : Ref a -> a -> IO ()
+```
+
+```
+File = Rec | Ref
+
+make_file : Bytes -> [File] -> IO File
+read_file_data : File -> IO Bytes
+read_file_refs : File -> IO [File]
+
+make_ref : File -> IO Ref
+read_ref : Ref -> IO File
+write_ref : Ref -> File -> IO ()
+```
