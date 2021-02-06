@@ -2,54 +2,40 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import cached_property, partial
+from os import PathLike
 from pathlib import Path
-from typing import (Callable, Dict, Generic, Iterator, List, Optional, Set,
-                    Type, TypeVar, Union, overload, Iterable, Tuple)
+from typing import (Callable, Dict, Generic, Iterable, Iterator, List, Mapping,
+                    Optional, Tuple, Type, TypeVar, Union, overload)
 
 import yaml
 
-T = TypeVar('T')
 K = TypeVar('K')
+T = TypeVar('T')
+U = TypeVar('U')
 
 
-class DataError(Exception):
+class HydrationError(Exception):
     def __init__(self, msg: str, loc: Loc) -> None:
         super().__init__(msg)
         self.loc = loc
-        self.ctx: List[str] = []
 
-    @staticmethod
-    @contextmanager
-    def context(text: str) -> Iterator[None]:
-        try:
-            yield
-        except DataError as e:
-            e.ctx.append(text)
-            raise
-
-    def pretty(self) -> str:
-        return '\n'.join([
-            '-' * 80,
-            'Context (most recent event last):',
-            *(f'  {c}' for c in reversed(self.ctx)),
-            f'{self.loc}: {self}',
-        ])
+    def __str__(self) -> str:
+        return f'{self.loc}: {super().__str__()}'
 
 
-@dataclass
+@dataclass(frozen=True)
 class Loc:
     file: Path
-    path: List[object]
+    path: Tuple[object, ...]
 
     def __str__(self) -> str:
         path = '.'.join(map(str, self.path))
         return f'{self.file}:.{path}'
 
     def __truediv__(self, seg: object) -> Loc:
-        return Loc(self.file, self.path + [seg])
+        return Loc(self.file, (*self.path, seg))
 
 
 @dataclass
@@ -62,8 +48,8 @@ Missing = MissingType()
 
 @dataclass(frozen=True)
 class Raw:
-    loc: Loc
     data: object
+    loc: Loc
 
     @property
     def missing(self) -> bool:
@@ -75,7 +61,7 @@ class Raw:
                 return cls()
             exp = cls.__name__
             found = 'nothing' if self.missing else type(self.data).__name__
-            raise DataError(f'expected {exp}, found {found}', self.loc)
+            raise HydrationError(f'expected {exp}, found {found}', self.loc)
         return self.data
 
     def __bool__(self) -> bool:
@@ -92,12 +78,12 @@ class Raw:
 
     def list(self) -> Iterable[Raw]:
         data: List[object] = self._as(list, opt=True)
-        return (Raw(self.loc / i, v) for i, v in enumerate(data))
+        return (Raw(v, self.loc / i) for i, v in enumerate(data))
 
     def dict(self) -> Iterable[Tuple[Raw, Raw]]:
         data: Dict[object, object] = self._as(dict, opt=True)
         return (
-            (Raw(self.loc / k / '<key>', k), Raw(self.loc / k, v))
+            (Raw(k, self.loc / k / '<key>'), Raw(v, self.loc / k))
             for k, v in data.items()
         )
 
@@ -109,24 +95,93 @@ class RawDict(Dict[K, Raw]):
 
     def __getitem__(self, key: K) -> Raw:
         if key not in self:
-            return Raw(self.loc / key, Missing)
+            return Raw(Missing, self.loc / key)
         return super().__getitem__(key)
 
 
-class LazyDict(Generic[K, T]):
-    def __init__(self, data: Dict[K, Raw], mk: Maker[T]) -> None:
-        self.data = data
-        self.mk = mk
+class Hydrated:
+    _loc: Loc
 
-    @lru_cache(None)
+    def __class_getitem__(cls, args):
+        return partial(cls, args=args)
+
+
+class Opt(Hydrated, Generic[T]):
+    def __init__(self, raw: Raw, *, args: Maker[T] = None) -> None:
+        assert args is not None
+        self.mk = args
+        self.raw = raw
+        self._loc = raw.loc
+
+    def __bool__(self) -> bool:
+        return not self.raw.missing
+
+    @cached_property
+    def value(self) -> T:
+        return self.mk(self.raw)
+
+
+class Arr(Hydrated, List[T]):
+    def __init__(self, raw: Raw, *, args: Maker[T] = None) -> None:
+        assert args is not None
+        super().__init__(args(a) for a in raw.list())
+        self._loc = raw.loc
+
+
+class Map(Hydrated, Dict[K, T]):
+    def __init__(
+            self,
+            raw: Raw,
+            *,
+            args: Tuple[Maker[K], Maker[T]] = None,
+    ) -> None:
+        assert args is not None
+        mk_key, mk_val = args
+        super().__init__((mk_key(k), mk_val(v)) for k, v in raw.dict())
+        self._loc = raw.loc
+
+
+class LazyMap(Hydrated, Mapping[K, T]):
+    def __init__(
+            self,
+            raw: Raw,
+            *,
+            args: Tuple[Maker[K], Maker[T]] = None,
+    ) -> None:
+        assert args is not None
+        mk_key, mk_val = args
+        self.src = RawDict(raw, mk_key)
+        self.f = mk_val
+        self.cache: Dict[K, T] = {}
+
     def __getitem__(self, key: K) -> T:
-        return self.mk(self.data[key])
+        if key not in self.cache:
+            self.cache[key] = self.f(self.src[key])
+        return self.cache[key]
 
-    def __contains__(self, key: K) -> bool:
-        return key in self.data
+    def __iter__(self) -> Iterator[K]:
+        return iter(self.src)
 
     def __len__(self) -> int:
-        return len(self.data)
+        return len(self.src)
+
+    def __contains__(self, key: object) -> bool:
+        return key in self.src
+
+
+@dataclass
+class CatMap(Mapping[K, T]):
+    a: Mapping[K, T]
+    b: Mapping[K, T]
+
+    def __getitem__(self, key: K) -> T:
+        return self.a[key] if key in self.a else self.b[key]
+
+    def __iter__(self) -> Iterator[K]:
+        return iter(self.a.keys() | self.b.keys())
+
+    def __len__(self) -> int:
+        return len(self.a.keys() | self.b.keys())
 
 
 class Struct:
@@ -173,31 +228,16 @@ class LazyField(Generic[T]):
 Maker = Callable[[Raw], T]
 
 
-def list_of(mk: Maker[T]) -> Maker[List[T]]:
-    return lambda raw: list(map(mk, raw.list()))
-
-
-def set_of(mk: Maker[T]) -> Maker[Set[T]]:
-    return lambda raw: set(map(mk, raw.list()))
-
-
-def dict_of(mk_key: Maker[K], mk_val: Maker[T]) -> Maker[Dict[K, T]]:
-    return lambda raw: {mk_key(k): mk_val(v) for k, v in raw.dict()}
-
-
-def lazy_dict_of(mk_key: Maker[K], mk_val: Maker[T]) -> Maker[LazyDict[K, T]]:
-    return lambda raw: LazyDict(RawDict(raw, mk_key), mk_val)
-
-
-def load_yaml(mk: Maker[T], path: Path) -> T:
-    with open(path) as f:
+def load_yaml(mk: Maker[T], path: Union[str, PathLike[str]]) -> T:
+    p = Path(path)
+    with open(p) as f:
         data: object = yaml.safe_load(f)
-    loc = Loc(path, [])
-    return mk(Raw(loc, data))
+    loc = Loc(p, ())
+    return mk(Raw(data, loc))
 
 
 class Executable(Struct):
-    dependencies = LazyField(set_of(str))
+    dependencies = LazyField(Arr[str])
 
     def _init(self) -> None:
         self.main = str(self._raw['main'])
@@ -205,9 +245,9 @@ class Executable(Struct):
 
 class Package(Struct):
     name = LazyField(str)
-    dependencies = LazyField(set_of(str))
+    dependencies = LazyField(Arr[str])
     ghc_options = LazyField(str, key='ghc-options')
-    executables = LazyField(lazy_dict_of(str, Executable))
+    executables = LazyField(LazyMap[str, Executable])
 
 
 pkg = load_yaml(Package, Path(__file__).parent / 'package.yaml')
@@ -218,8 +258,6 @@ print(f'{pkg.ghc_options=}')
 print(f'{pkg.executables["Action"].main=}')
 print(f'{pkg.executables["Generator"].dependencies=}')
 try:
-    with DataError.context('outer'):
-        with DataError.context('inner'):
-            print(f'{pkg.executables["oops"]=}')
-except DataError as e:
-    print(e.pretty())
+    print(f'{pkg.executables["oops"]=}')
+except HydrationError as e:
+    print(e)
