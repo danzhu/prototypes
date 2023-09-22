@@ -60,3 +60,6 @@ data a * b = P a b
 l :: (a + b) -> Maybe a
 l (L a) = Just a
 l _     = Nothing
+
+main :: IO ()
+main = pure ()

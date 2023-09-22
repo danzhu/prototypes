@@ -31,3 +31,9 @@ tuple = val
 
 mixed :: (Int, [Int])
 mixed = val
+
+main :: IO ()
+main = do
+  print list
+  print tuple
+  print mixed

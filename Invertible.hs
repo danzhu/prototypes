@@ -180,3 +180,7 @@ synExp = Iso to from <$$> (synSymbol <++> paren (many synExp)) where
   to (Right l) = Paren l
   from (Symbol s) = Left s
   from (Paren l)  = Right l
+
+
+main :: IO ()
+main = pure ()

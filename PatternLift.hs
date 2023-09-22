@@ -13,3 +13,6 @@ data Pat
 
 test :: Maybe Int -> Maybe (IO ())
 test m = m >>= \i -> pure $ getLine >>= \l -> putStrLn l
+
+main :: IO ()
+main = pure ()

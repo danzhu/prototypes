@@ -6,24 +6,12 @@ dependencies:
 ghc-options: -Wall
 
 executables:
-  MacroInterp:
-    main: MacroInterp.hs
-    dependencies:
-      - megaparsec
-      - parser-combinators
-  Generator:
-    main: Generator.hs
   Action:
     main: Action.hs
     dependencies:
       - transformers
-  Template:
-    main: Template.hs
-    dependencies:
-      - megaparsec
-      - parser-combinators
-      - mtl
-      - containers
+  Async:
+    main: Async.hs
   ConfigLang:
     main: ConfigLang.hs
     dependencies:
@@ -32,10 +20,24 @@ executables:
       - mtl
       - parser-combinators
       - text
-  Multiplicity:
-    main: Multiplicity.hs
+  Cont:
+    main: Cont.hs
     dependencies:
-      - mtl
+      - containers
+  ContChain:
+    main: ContChain.hs
+    dependencies:
+      - transformers
+  ContraTuple:
+    main: ContraTuple.hs
+    dependencies:
+      - transformers
+  ContResource:
+    main: ContResource.hs
+    dependencies:
+      - transformers
+  Curry:
+    main: Curry.hs
   FunctionRecord:
     main: FunctionRecord.hs
     dependencies:
@@ -45,11 +47,52 @@ executables:
       - parser-combinators
       - text
       - transformers
-  ContChain:
-    main: ContChain.hs
+  Generator:
+    main: Generator.hs
+  Invertible:
+    main: Invertible.hs
+  Lambda:
+    main: Lambda.hs
     dependencies:
-      - transformers
-  ContResource:
-    main: ContResource.hs
+      - mtl
+  Lens:
+    main: Lens.hs
+  MacroInterp:
+    main: MacroInterp.hs
     dependencies:
+      - megaparsec
+      - parser-combinators
+  Memoize:
+    main: Memoize.hs
+    dependencies:
+      - containers
       - transformers
+  Multiplicity:
+    main: Multiplicity.hs
+    dependencies:
+      - mtl
+  Pattern:
+    main: Pattern.hs
+  PatternLift:
+    main: PatternLift.hs
+  Pipe:
+    main: Pipe.hs
+  PolyCons:
+    main: PolyCons.hs
+  Printf:
+    main: Printf.hs
+  RecurseWithoutSelfRef:
+    main: RecurseWithoutSelfRef.hs
+  Res:
+    main: Res.hs
+  Rope:
+    main: Rope.hs
+  Step:
+    main: Step.hs
+  Template:
+    main: Template.hs
+    dependencies:
+      - megaparsec
+      - parser-combinators
+      - mtl
+      - containers
