@@ -71,6 +71,8 @@ executables:
     main: Multiplicity.hs
     dependencies:
       - mtl
+  Optics:
+    main: Optics.hs
   Pattern:
     main: Pattern.hs
   PatternLift:
