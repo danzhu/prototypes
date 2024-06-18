@@ -1,5 +1,5 @@
-{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE QuantifiedConstraints #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TupleSections #-}
 
@@ -17,7 +17,7 @@ import Data.Monoid
     First (First, getFirst),
   )
 import Data.Void (absurd)
-import Data.Functor.Contravariant (Contravariant (contramap), phantom)
+import Data.Functor.Contravariant (Contravariant (contramap))
 
 class Profunctor p where
   dimap :: (a -> b) -> (c -> d) -> p b c -> p a d
@@ -28,7 +28,7 @@ class Profunctor p where
   rmap = dimap id
   {-# MINIMAL dimap | lmap, rmap #-}
 
-class Bicontravariant p where
+class (forall a. Contravariant (p a)) => Bicontravariant p where
   contrabimap :: (b -> a) -> (d -> c) -> p a c -> p b d
   contrabimap l r = contrafirst l . contrasecond r
   contrafirst :: (b -> a) -> p a c -> p b c
@@ -123,11 +123,19 @@ type ASetter'    s a = ASetter    s s a a
 
 -- Exchange
 
+instance Functor (Exchange a b s) where
+  fmap :: (t -> v) -> Exchange a b s t -> Exchange a b s v
+  fmap tv (Exchange sa bt) = Exchange sa (tv . bt)
+
 instance Profunctor (Exchange a b) where
   dimap :: (u -> s) -> (t -> v) -> Exchange a b s t -> Exchange a b u v
   dimap us tv (Exchange sa bt) = Exchange (sa . us) (tv . bt)
 
 -- Market
+
+instance Functor (Market a b s) where
+  fmap :: (t -> v) -> Market a b s t -> Market a b s v
+  fmap tv (Market bt sta) = Market (tv . bt) (left tv . sta)
 
 instance Profunctor (Market a b) where
   dimap :: (u -> s) -> (t -> v) -> Market a b s t -> Market a b u v
@@ -145,6 +153,9 @@ instance Choice (Market a b) where
 
 -- Store
 
+instance Functor (Store a b s) where
+  fmap = rmap
+
 instance Profunctor (Store a b) where
   dimap :: (u -> s) -> (t -> v) -> Store a b s t -> Store a b u v
   dimap us tv (Store sa sbt) = Store (sa . us) (\u -> tv . sbt (us u))
@@ -157,6 +168,9 @@ instance Strong (Store a b) where
 
 -- Well
 
+instance Functor (Well a b s) where
+  fmap = rmap
+
 instance Profunctor (Well a b) where
   dimap :: (u -> s) -> (t -> v) -> Well a b s t -> Well a b u v
   dimap us tv (Well sabt) = Well $ \uab -> tv $ sabt $ \sa -> uab (sa . us)
@@ -166,6 +180,12 @@ instance Closed (Well a b) where
   closed (Well sabt) = Well $ \xsab x -> sabt $ \sa -> xsab $ sa . ($ x)
 
 -- Star
+
+instance Functor f => Functor (Star f a) where
+  fmap = rmap
+
+instance Contravariant f => Contravariant (Star f a) where
+  contramap = contrasecond
 
 instance Functor f => Profunctor (Star f) where
   dimap l r (Star f) = Star $ fmap r . f . l
@@ -191,6 +211,12 @@ instance Applicative f => Traversing (Star f) where
 
 -- Forget
 
+instance Functor (Forget r a) where
+  fmap = rmap
+
+instance Contravariant (Forget r a) where
+  contramap = contrasecond
+
 instance Profunctor (Forget r) where
   dimap l _ (Forget f) = Forget $ f . l
 
@@ -215,6 +241,9 @@ instance Monoid r => Traversing (Forget r) where
 
 -- Tagged
 
+instance Functor (Tagged a) where
+  fmap = rmap
+
 instance Profunctor Tagged where
   dimap _ r (Tagged b) = Tagged $ r b
 
@@ -233,6 +262,12 @@ instance Closed Tagged where
   closed (Tagged b) = Tagged $ const b
 
 -- Re
+
+instance Bicontravariant p => Functor (Re p s t a) where
+  fmap = second
+
+instance Bifunctor p => Contravariant (Re p s t a) where
+  contramap = contrasecond
 
 instance Profunctor p => Profunctor (Re p s t) where
   dimap l r (Re p) = Re $ p . dimap r l

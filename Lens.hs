@@ -76,6 +76,9 @@ instance Choice (Market a b) where
     where
       f' = either (Left . Left) (left Right . f)
 
+instance Functor (Tagged s) where
+  fmap f (Tagged a) = Tagged (f a)
+
 instance Profunctor Tagged where
   dimap _ r (Tagged a) = Tagged (r a)
 
