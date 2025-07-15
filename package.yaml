@@ -47,6 +47,8 @@ executables:
       - parser-combinators
       - text
       - transformers
+  Futamura:
+    main: Futamura.hs
   Generator:
     main: Generator.hs
   Invertible:
